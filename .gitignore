@@ -216,3 +216,28 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- Project specific ---
+
+# Private planning document, not published
+rag.md
+
+# Large or generated data, kept out of the repo
+data/
+models/
+*.gguf
+
+# Flutter keeps source in mobile/lib, so undo the generic lib/ rule above
+!mobile/lib/
+mobile/.dart_tool/
+mobile/build/
+mobile/.flutter-plugins*
+*.iml
+
+# Node / web
+node_modules/
+web/dist/
+.vite/
+
+# Generated API clients
+shared/generated/

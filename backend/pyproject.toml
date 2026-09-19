@@ -1,0 +1,58 @@
+[project]
+name = "abstract-context-rag"
+version = "0.1.0"
+description = "Local RAG engine for grounded Q&A over research papers and Wikipedia"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "pyyaml>=6.0",
+    "python-multipart>=0.0.12",
+    "httpx>=0.27",
+    "typer>=0.15",
+    "qdrant-client>=1.12",
+    "docling>=2.15",
+    "FlagEmbedding>=1.3",
+    "arxiv>=2.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+]
+
+[project.scripts]
+abstractrag = "abstractrag.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["abstractrag"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = [
+    # typer and FastAPI declare options and form fields as argument defaults by design.
+    "B008",
+    # str + Enum keeps the code runnable below 3.11 and serializes the same way.
+    "UP042",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "integration: needs a running Qdrant instance (docker compose up qdrant)",
+]

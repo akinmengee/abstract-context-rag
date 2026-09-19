@@ -1,0 +1,52 @@
+# Runtime configuration for the RAG engine.
+# Every value can be overridden with environment variables:
+#   ACR_LLM__MODEL=qwen3-8b  ->  llm.model
+# A different file can be pointed at with ACR_CONFIG_FILE.
+
+llm:
+  # llama.cpp server exposes an OpenAI-compatible API.
+  # Docker -> host: http://host.docker.internal:8080/v1
+  base_url: "http://localhost:8080/v1"
+  model: "qwen3-4b"
+  # Start small; raise only when map-reduce / RAPTOR needs more context (6 GB VRAM budget).
+  ctx_size: 4096
+  temperature: 0.1
+  max_tokens: 1024
+  timeout_seconds: 180
+
+embedding:
+  model: "BAAI/bge-m3"
+  # CPU keeps VRAM free for the LLM; switch to "cuda" for bulk ingestion.
+  device: "cpu"
+  batch_size: 8
+  max_length: 1024
+  dense_size: 1024
+
+reranker:
+  model: "BAAI/bge-reranker-v2-m3"
+  device: "cpu"
+  enabled: true
+
+qdrant:
+  url: "http://localhost:6333"
+  collection: "documents"
+
+chunking:
+  # Section-aware chunking: blocks are grouped per section, then split by size.
+  target_chars: 1800
+  overlap_chars: 200
+  min_chunk_chars: 200
+
+retrieval:
+  mode: "hybrid" # dense | sparse | hybrid
+  # Stage 1 casts a wide net (recall), stage 2 reranks down to the context (precision).
+  candidates: 50
+  context_size: 5
+  rrf_k: 60
+  # Below this reranker score the question is answered with an abstain instead of the LLM.
+  score_threshold: 0.3
+
+ingestion:
+  # Downloaded PDFs and parser output land here (gitignored).
+  storage_dir: "data/documents"
+  user_agent: "abstract-context-rag/0.1 (https://github.com/akinmengee/abstract-context-rag)"

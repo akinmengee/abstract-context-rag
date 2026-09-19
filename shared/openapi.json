@@ -1,0 +1,691 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "abstract-context-rag",
+    "description": "Local RAG engine for grounded Q&A over research papers and Wikipedia.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Health",
+        "operationId": "health_api_v1_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Health Api V1 Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/health/dependencies": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Dependencies",
+        "operationId": "dependencies_api_v1_health_dependencies_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "type": "object",
+                  "title": "Response Dependencies Api V1 Health Dependencies Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ingest": {
+      "post": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "Ingest",
+        "description": "Ingest by arXiv ID or Wikipedia title/URL.",
+        "operationId": "ingest_api_v1_ingest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ingest/upload": {
+      "post": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "Ingest Upload",
+        "description": "Ingest an uploaded PDF.",
+        "operationId": "ingest_upload_api_v1_ingest_upload_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_ingest_upload_api_v1_ingest_upload_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/documents": {
+      "get": {
+        "tags": [
+          "documents"
+        ],
+        "summary": "List Documents",
+        "operationId": "list_documents_api_v1_documents_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DocumentSummary"
+                  },
+                  "type": "array",
+                  "title": "Response List Documents Api V1 Documents Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/chat": {
+      "post": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Chat",
+        "description": "Answer a question from the indexed sources, or abstain if they cannot.",
+        "operationId": "chat_api_v1_chat_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Answer"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/chat/stream": {
+      "post": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Chat Stream",
+        "description": "Same answer as /chat, streamed as Server-Sent Events.\n\nEvent order is fixed: `citations` once, then `token` repeatedly, then `done`\ncarrying the final answer (including the abstain flag). An abstain sends\n`done` without any tokens.",
+        "operationId": "chat_stream_api_v1_chat_stream_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Answer": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/Citation"
+            },
+            "type": "array",
+            "title": "Citations"
+          },
+          "abstained": {
+            "type": "boolean",
+            "title": "Abstained",
+            "default": false
+          },
+          "used_chunks": {
+            "items": {
+              "$ref": "#/components/schemas/RetrievedChunk"
+            },
+            "type": "array",
+            "title": "Used Chunks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "title": "Answer"
+      },
+      "BlockType": {
+        "type": "string",
+        "enum": [
+          "title",
+          "heading",
+          "paragraph",
+          "list",
+          "table",
+          "caption",
+          "formula",
+          "other"
+        ],
+        "title": "BlockType"
+      },
+      "Body_ingest_upload_api_v1_ingest_upload_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_ingest_upload_api_v1_ingest_upload_post"
+      },
+      "ChatRequest": {
+        "properties": {
+          "question": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Question",
+            "examples": [
+              "What datasets does the paper evaluate on?"
+            ]
+          },
+          "document_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "question"
+        ],
+        "title": "ChatRequest"
+      },
+      "Chunk": {
+        "properties": {
+          "chunk_id": {
+            "type": "string",
+            "title": "Chunk Id"
+          },
+          "document_id": {
+            "type": "string",
+            "title": "Document Id"
+          },
+          "index": {
+            "type": "integer",
+            "title": "Index"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/ChunkMetadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "chunk_id",
+          "document_id",
+          "index",
+          "text",
+          "metadata"
+        ],
+        "title": "Chunk"
+      },
+      "ChunkMetadata": {
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "title": "Document Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "source_type": {
+            "$ref": "#/components/schemas/SourceType"
+          },
+          "origin": {
+            "type": "string",
+            "title": "Origin"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section"
+          },
+          "section_path": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Section Path"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          },
+          "block_types": {
+            "items": {
+              "$ref": "#/components/schemas/BlockType"
+            },
+            "type": "array",
+            "title": "Block Types"
+          }
+        },
+        "type": "object",
+        "required": [
+          "document_id",
+          "title",
+          "source_type",
+          "origin"
+        ],
+        "title": "ChunkMetadata",
+        "description": "Everything needed to cite a chunk back to its place in the source."
+      },
+      "Citation": {
+        "properties": {
+          "marker": {
+            "type": "integer",
+            "title": "Marker"
+          },
+          "chunk_id": {
+            "type": "string",
+            "title": "Chunk Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          },
+          "origin": {
+            "type": "string",
+            "title": "Origin"
+          }
+        },
+        "type": "object",
+        "required": [
+          "marker",
+          "chunk_id",
+          "title",
+          "origin"
+        ],
+        "title": "Citation",
+        "description": "One numbered context block the answer is allowed to point at."
+      },
+      "DocumentSummary": {
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "title": "Document Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "source_type": {
+            "type": "string",
+            "title": "Source Type"
+          },
+          "origin": {
+            "type": "string",
+            "title": "Origin"
+          },
+          "chunk_count": {
+            "type": "integer",
+            "title": "Chunk Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "document_id",
+          "title",
+          "source_type",
+          "origin",
+          "chunk_count"
+        ],
+        "title": "DocumentSummary"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "IngestRequest": {
+        "properties": {
+          "arxiv_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arxiv Id",
+            "examples": [
+              "2005.11401"
+            ]
+          },
+          "wikipedia": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wikipedia",
+            "examples": [
+              "Retrieval-augmented generation"
+            ]
+          }
+        },
+        "type": "object",
+        "title": "IngestRequest",
+        "description": "Ingest by identifier. File uploads use the multipart endpoint instead."
+      },
+      "IngestResult": {
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "title": "Document Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "source_type": {
+            "$ref": "#/components/schemas/SourceType"
+          },
+          "origin": {
+            "type": "string",
+            "title": "Origin"
+          },
+          "chunk_count": {
+            "type": "integer",
+            "title": "Chunk Count"
+          },
+          "page_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "document_id",
+          "title",
+          "source_type",
+          "origin",
+          "chunk_count"
+        ],
+        "title": "IngestResult"
+      },
+      "RetrievedChunk": {
+        "properties": {
+          "chunk": {
+            "$ref": "#/components/schemas/Chunk"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          },
+          "rerank_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rerank Score"
+          }
+        },
+        "type": "object",
+        "required": [
+          "chunk",
+          "score"
+        ],
+        "title": "RetrievedChunk",
+        "description": "A chunk plus the score of whichever stage produced it."
+      },
+      "SourceType": {
+        "type": "string",
+        "enum": [
+          "pdf",
+          "wikipedia"
+        ],
+        "title": "SourceType"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}
