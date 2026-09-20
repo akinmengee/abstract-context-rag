@@ -145,6 +145,12 @@ class RagEngine:
         if not top or top[0].effective_score < self.settings.retrieval.score_threshold:
             logger.info("abstaining: best score below threshold")
             return None
+
+        # Embedder and reranker shared the GPU with the LLM one at a time, never
+        # concurrently - free their VRAM now so the LLM call isn't fighting them
+        # for memory (measured: this was a 6x slowdown on the LLM call otherwise).
+        self.embedder.unload()
+        self.reranker.unload()
         return top
 
     def health(self) -> dict[str, bool]:

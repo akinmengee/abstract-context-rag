@@ -4,27 +4,39 @@
 # A different file can be pointed at with ACR_CONFIG_FILE.
 
 llm:
-  # llama.cpp server exposes an OpenAI-compatible API.
-  # Docker -> host: http://host.docker.internal:8080/v1
-  base_url: "http://localhost:8080/v1"
-  model: "qwen3-4b"
+  # Ollama exposes an OpenAI-compatible API (chosen over a raw llama.cpp server
+  # for ease of setup; still llama.cpp/ggml underneath). Model pulled via
+  # `ollama pull qwen3:4b` - not our own GGUF import, so the chat template is
+  # the one Ollama curates, not auto-detected from the raw file.
+  # Docker -> host: http://host.docker.internal:11434/v1
+  # 127.0.0.1, not localhost: Ollama binds IPv4 only, and Windows can resolve
+  # "localhost" to the IPv6 loopback (::1) first, which nothing is listening on.
+  base_url: "http://127.0.0.1:11434/v1"
+  model: "qwen3:4b"
   # Start small; raise only when map-reduce / RAPTOR needs more context (6 GB VRAM budget).
   ctx_size: 4096
   temperature: 0.1
-  max_tokens: 1024
-  timeout_seconds: 180
+  # Qwen3 "thinks" before answering (separate `reasoning` field we never read).
+  # `think: false` (llm_client.py) shortens it but does not eliminate it, and a
+  # real question with real retrieved context thinks far longer than a trivial
+  # test prompt - budget generously so content never gets starved.
+  max_tokens: 4096
+  timeout_seconds: 240
 
 embedding:
   model: "BAAI/bge-m3"
-  # CPU keeps VRAM free for the LLM; switch to "cuda" for bulk ingestion.
-  device: "cpu"
+  # embed -> rerank -> LLM run sequentially within one request, never at the
+  # same time, so there is no real VRAM contention to avoid. On CPU this model
+  # was the actual bottleneck (measured: reranking 37 candidates took 104s on
+  # CPU); GPU + fp16 (applied automatically for any non-"cpu" device) fixes it.
+  device: "cuda"
   batch_size: 8
   max_length: 1024
   dense_size: 1024
 
 reranker:
   model: "BAAI/bge-reranker-v2-m3"
-  device: "cpu"
+  device: "cuda"
   enabled: true
 
 qdrant:

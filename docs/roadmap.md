@@ -7,7 +7,7 @@ Status: ✅ done · 🚧 in progress · ⬜ not started
 
 | # | Phase | What it adds | How it is measured | Status |
 |---|---|---|---|---|
-| 1 | Baseline | Docling parsing, section-aware chunking, bge-m3, Qdrant, grounded answers from llama.cpp | Parse QC report, first golden set answers | 🚧 |
+| 1 | Baseline | Docling parsing, section-aware chunking, bge-m3, Qdrant, grounded answers from Ollama | Parse QC report, first golden set answers | 🚧 |
 | 2 | Retrieval depth | Hybrid search, RRF, cross-encoder reranking, chunking variants | Ablation table: BM25 vs dense vs hybrid vs hybrid+rerank (recall@k, MRR, nDCG) | 🚧 |
 | 3 | Query and verification | Query routing, map-reduce summaries, citation verification | Faithfulness before/after verification; abstain accuracy | ⬜ |
 | 4 | Agentic RAG | Corrective / self-reflective retrieval, multi-paper questions | Multi-hop question accuracy | ⬜ |
@@ -28,8 +28,15 @@ Done:
 - Grounded generation with numbered citations and lost-in-the-middle context ordering
 - FastAPI (`/api/v1`), SSE streaming, `abstractrag` CLI, Gradio dev console
 - Parse QC report (block types, section outline, reading-order warnings)
+- **First real end-to-end run** (2026-09-20): ingested the RAG paper (2005.11401),
+  asked two real questions, got correct grounded answers with accurate citations
+  (verified against the paper). ~70s per question (see `rag.md` §3 for the
+  CUDA/Ollama setup issues this took to get working: CPU-only torch by default,
+  `localhost` vs `127.0.0.1` on Windows, Qwen3 thinking-mode token budget).
 
 Next:
 - Run the parser over the target paper set and review the QC reports
 - Build the golden dataset (LLM draft, verified by hand) and the evaluation harness
 - Produce the first ablation table
+- Investigate LLM call latency further (~40-60s of the ~70s total is the Ollama
+  call itself; thinking mode is the main suspect)

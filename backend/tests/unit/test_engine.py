@@ -22,12 +22,24 @@ class FakeReranker:
 
     def __init__(self, scores: list[float]) -> None:
         self.scores = scores
+        self.unloaded = False
 
     def rerank(self, query: str, candidates: list[RetrievedChunk], top_k: int):
         for candidate, score in zip(candidates, self.scores, strict=False):
             candidate.rerank_score = score
         candidates.sort(key=lambda candidate: candidate.effective_score, reverse=True)
         return candidates[:top_k]
+
+    def unload(self) -> None:
+        self.unloaded = True
+
+
+class FakeEmbedder:
+    def __init__(self) -> None:
+        self.unloaded = False
+
+    def unload(self) -> None:
+        self.unloaded = True
 
 
 class FakeLLM:
@@ -53,7 +65,7 @@ def build_engine(
         settings=settings,
         resolver=None,
         chunker=None,
-        embedder=None,
+        embedder=FakeEmbedder(),
         store=None,
         retriever=FakeRetriever(candidates),
         reranker=FakeReranker(scores),
@@ -116,6 +128,24 @@ def test_context_uses_lost_in_the_middle_order_not_raw_rank_order():
     assert [citation.page for citation in answer.citations] == [1, 3, 2]
     # used_chunks stays in plain rank order - it feeds the debug UI, not the prompt.
     assert [chunk.chunk.metadata.page for chunk in answer.used_chunks] == [1, 2, 3]
+
+
+def test_embedder_and_reranker_are_freed_before_calling_the_llm():
+    engine = build_engine([candidate("relevant", 0)], [0.9], "Grounded answer [1].")
+
+    engine.answer("question")
+
+    assert engine.embedder.unloaded
+    assert engine.reranker.unloaded
+
+
+def test_gpu_is_not_freed_on_abstain_since_the_llm_is_never_called():
+    engine = build_engine([candidate("weak", 0)], [0.05], "should never be used")
+
+    engine.answer("unrelated question")
+
+    assert not engine.embedder.unloaded
+    assert not engine.reranker.unloaded
 
 
 def test_stream_sends_citations_first_then_tokens_then_done():

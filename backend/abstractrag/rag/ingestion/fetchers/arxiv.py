@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import arxiv
+import httpx
 
 from abstractrag.core.errors import FetchError, SourceNotFoundError
 from abstractrag.core.logging import get_logger
@@ -50,8 +51,16 @@ def fetch_arxiv_paper(raw_id: str, dest_dir: Path) -> ArxivPaper:
     filename = f"{arxiv_id.replace('/', '_')}.pdf"
     target = dest_dir / filename
     if not target.exists():
+        # The arxiv package only resolves metadata + pdf_url; fetching the
+        # bytes ourselves avoids depending on its (unstable) download helper.
+        pdf_url = result.pdf_url or f"https://arxiv.org/pdf/{arxiv_id}"
         logger.info("downloading arXiv %s", arxiv_id)
-        result.download_pdf(dirpath=str(dest_dir), filename=filename)
+        try:
+            response = httpx.get(pdf_url, follow_redirects=True, timeout=60.0)
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise FetchError(f"failed to download {pdf_url}: {exc}") from exc
+        target.write_bytes(response.content)
 
     return ArxivPaper(
         arxiv_id=arxiv_id,

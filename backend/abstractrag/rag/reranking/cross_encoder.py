@@ -10,6 +10,7 @@ from typing import Any
 
 from abstractrag.core.config import RerankerSettings
 from abstractrag.core.logging import get_logger
+from abstractrag.rag.gpu import release_cuda_memory
 from abstractrag.rag.models import RetrievedChunk
 
 logger = get_logger(__name__)
@@ -52,3 +53,10 @@ class CrossEncoderReranker:
 
         candidates.sort(key=lambda candidate: candidate.effective_score, reverse=True)
         return candidates[:top_k]
+
+    def unload(self) -> None:
+        """Drop the model so the LLM has the GPU to itself. Reloads lazily
+        (~5-7s) on next use - only worth calling right before an LLM call."""
+        if self._model is not None:
+            self._model = None
+            release_cuda_memory()

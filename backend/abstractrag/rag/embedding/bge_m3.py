@@ -1,8 +1,10 @@
 """bge-m3 embeddings.
 
 One model produces both vectors the hybrid retriever needs: a dense vector for
-semantic similarity and lexical weights for keyword matching. Runs on CPU by
-default so the 6 GB of VRAM stay reserved for the LLM.
+semantic similarity and lexical weights for keyword matching. CPU inference
+measured ~40x slower than GPU for this model (see reranker for the matching
+number), so it runs on CUDA despite the LLM sharing the same 6 GB - the two
+never run at the same time within one request; see unload().
 """
 
 from dataclasses import dataclass
@@ -10,6 +12,7 @@ from typing import Any
 
 from abstractrag.core.config import EmbeddingSettings
 from abstractrag.core.logging import get_logger
+from abstractrag.rag.gpu import release_cuda_memory
 
 logger = get_logger(__name__)
 
@@ -64,3 +67,10 @@ class BgeM3Embedder:
 
     def embed_one(self, text: str) -> Embedding:
         return self.embed([text])[0]
+
+    def unload(self) -> None:
+        """Drop the model so the LLM has the GPU to itself. Reloads lazily
+        (~15-20s) on next use - only worth calling right before an LLM call."""
+        if self._model is not None:
+            self._model = None
+            release_cuda_memory()

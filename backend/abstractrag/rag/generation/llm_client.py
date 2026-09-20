@@ -11,6 +11,9 @@ import httpx
 
 from abstractrag.core.config import LLMSettings
 from abstractrag.core.errors import LLMError
+from abstractrag.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class LlamaCppClient:
@@ -26,7 +29,20 @@ class LlamaCppClient:
                 timeout=self.settings.timeout_seconds,
             )
             response.raise_for_status()
-            return response.json()["choices"][0]["message"]["content"].strip()
+            body = response.json()
+            text = body["choices"][0]["message"]["content"].strip()
+            if not text:
+                # Most likely cause: max_tokens ran out during Qwen3's "thinking"
+                # pass before any content was written - this makes that visible
+                # instead of a silent empty answer.
+                choice = body["choices"][0]
+                logger.warning(
+                    "empty content: finish_reason=%s usage=%s reasoning_chars=%d",
+                    choice.get("finish_reason"),
+                    body.get("usage"),
+                    len(choice.get("message", {}).get("reasoning") or ""),
+                )
+            return text
         except httpx.HTTPError as exc:
             raise LLMError(f"llama.cpp request failed: {exc}") from exc
         except (KeyError, IndexError, ValueError) as exc:
@@ -64,6 +80,11 @@ class LlamaCppClient:
             "temperature": self.settings.temperature,
             "max_tokens": self.settings.max_tokens,
             "stream": stream,
+            # Ollama-specific: hybrid models like Qwen3 default to a chain-of-thought
+            # pass before answering, which we never read (see engine.py) and only
+            # costs latency for grounded extraction. Ignored by servers that don't
+            # support it, so this stays safe if the backend is swapped later.
+            "think": False,
         }
 
 
