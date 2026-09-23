@@ -1,5 +1,7 @@
 """Map-reduce summarisation: grouping sections, then summarising them."""
 
+from abstractrag.core.config import EmbeddingSettings, QdrantSettings
+from abstractrag.database.qdrant_store import QdrantStore
 from abstractrag.rag.summarization.sections import group_sections
 from tests.conftest import make_chunk
 
@@ -76,3 +78,55 @@ class TestGroupSections:
         group = group_sections(chunks, max_chars=1000)[0]
 
         assert group.chunk_ids == [chunks[0].chunk_id, chunks[1].chunk_id]
+
+
+class _FakePoint:
+    def __init__(self, chunk):
+        self.payload = {"chunk": chunk.model_dump(mode="json")}
+
+
+class _FakeClient:
+    """Scrolls one page at a time so the paging loop is actually exercised."""
+
+    def __init__(self, chunks, page_size=2):
+        self.chunks = chunks
+        self.page_size = page_size
+        self.filters = []
+
+    def scroll(
+        self, collection_name, scroll_filter=None, limit=None, offset=None, with_payload=True
+    ):
+        self.filters.append(scroll_filter)
+        start = offset or 0
+        page = self.chunks[start : start + self.page_size]
+        next_offset = start + self.page_size if start + self.page_size < len(self.chunks) else None
+        return [_FakePoint(chunk) for chunk in page], next_offset
+
+
+def _store(chunks):
+    store = QdrantStore(QdrantSettings(), EmbeddingSettings())
+    store.client = _FakeClient(chunks)
+    return store
+
+
+class TestListChunks:
+    def test_every_page_is_read_not_just_the_first(self):
+        chunks = [make_chunk(f"c{i}", index=i) for i in range(5)]
+
+        assert len(_store(chunks).list_chunks("doc-1")) == 5
+
+    def test_chunks_come_back_in_document_order(self):
+        chunks = [make_chunk("second", index=1), make_chunk("first", index=0)]
+
+        assert [chunk.text for chunk in _store(chunks).list_chunks("doc-1")] == ["first", "second"]
+
+    def test_the_scroll_is_filtered_to_one_document(self):
+        # Without the filter this would summarise every ingested paper at once.
+        store = _store([make_chunk("a", index=0)])
+
+        store.list_chunks("doc-1")
+
+        assert store.client.filters and store.client.filters[0] is not None
+
+    def test_an_unknown_document_yields_nothing(self):
+        assert _store([]).list_chunks("doc-1") == []

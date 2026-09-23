@@ -18,6 +18,7 @@ logger = get_logger(__name__)
 
 DENSE_VECTOR = "dense"
 SPARSE_VECTOR = "sparse"
+_SCROLL_PAGE = 256
 
 
 class QdrantStore:
@@ -109,6 +110,27 @@ class QdrantStore:
             query_filter=_document_filter(document_id) if document_id else None,
         )
         return _to_chunks(response.points)
+
+    def list_chunks(self, document_id: str) -> list[Chunk]:
+        """Every chunk of one document, in reading order.
+
+        Summarising is a global task, so it needs the whole document rather than
+        what a query retrieves - this scrolls the collection instead of searching
+        it, paging until Qdrant stops handing back an offset.
+        """
+        chunks: list[Chunk] = []
+        offset = None
+        while True:
+            points, offset = self.client.scroll(
+                collection_name=self.collection,
+                scroll_filter=_document_filter(document_id),
+                limit=_SCROLL_PAGE,
+                offset=offset,
+                with_payload=True,
+            )
+            chunks.extend(Chunk.model_validate(point.payload["chunk"]) for point in points)
+            if offset is None:
+                return sorted(chunks, key=lambda chunk: chunk.index)
 
     def list_documents(self, limit: int = 100) -> list[dict[str, Any]]:
         """One entry per ingested document, built from the chunk payloads."""
