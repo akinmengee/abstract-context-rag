@@ -34,8 +34,14 @@ def make_document(blocks: list[DocumentBlock], title: str = "Test Paper") -> Par
     )
 
 
-def make_chunk(text: str, index: int = 0, section: str | None = "Results") -> Chunk:
+def make_chunk(
+    text: str,
+    index: int = 0,
+    section: str | None = "Results",
+    section_path: list[str] | None = None,
+) -> Chunk:
     document_id = document_id_for("test:chunk")
+    default_path = [section] if section else []
     return Chunk(
         chunk_id=chunk_id_for(document_id, index),
         document_id=document_id,
@@ -47,7 +53,7 @@ def make_chunk(text: str, index: int = 0, section: str | None = "Results") -> Ch
             source_type=SourceType.PDF,
             origin="test:chunk",
             section=section,
-            section_path=[section] if section else [],
+            section_path=section_path if section_path is not None else default_path,
             page=index + 1,
         ),
     )
