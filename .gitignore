@@ -241,3 +241,6 @@ web/dist/
 
 # Generated API clients
 shared/generated/
+
+# Subagent-driven-development scratch space (ledgers, briefs, review packages)
+.superpowers/
