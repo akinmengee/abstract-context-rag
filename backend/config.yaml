@@ -45,6 +45,10 @@ verification:
   # turns it off while working on something else.
   enabled: true
 
+summarization:
+  # One LLM call per group; raising this means fewer, larger calls.
+  max_group_chars: 6000
+
 qdrant:
   url: "http://localhost:6333"
   collection: "documents"

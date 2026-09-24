@@ -93,6 +93,20 @@ class RetrievedChunk(BaseModel):
         return self.rerank_score if self.rerank_score is not None else self.score
 
 
+class SectionSummary(BaseModel):
+    """One map step's output: what a [n] marker in a summary points at.
+
+    `chunk_ids` is the section's full source text, which is what verification
+    checks a summary claim against - never this summary of it, or a claim
+    invented here would confirm itself.
+    """
+
+    marker: int
+    section: str
+    text: str
+    chunk_ids: list[str] = Field(default_factory=list)
+
+
 class Citation(BaseModel):
     """One numbered context block the answer is allowed to point at."""
 
@@ -129,6 +143,10 @@ class Answer(BaseModel):
     # Empty when verification is disabled, or when the answer abstained and so
     # claimed nothing to check.
     verified_claims: list[VerifiedClaim] = Field(default_factory=list)
+    # Filled only by map-reduce summaries, where a citation marker means a whole
+    # section rather than one retrieved chunk (`used_chunks` stays empty there,
+    # because no retrieval ran). See rag.md 8.1.
+    section_summaries: list[SectionSummary] = Field(default_factory=list)
 
 
 class IngestResult(BaseModel):

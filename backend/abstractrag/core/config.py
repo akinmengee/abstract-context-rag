@@ -43,6 +43,13 @@ class VerificationSettings(BaseModel):
     enabled: bool = True
 
 
+class SummarizationSettings(BaseModel):
+    # One LLM call per group, so this is the cost dial: bigger groups mean fewer
+    # calls. Kept well under llm.ctx_size (6000 chars is roughly 1500 tokens) so
+    # the prompt and the summary still fit without raising the context window.
+    max_group_chars: int = 6000
+
+
 class QdrantSettings(BaseModel):
     url: str = "http://localhost:6333"
     collection: str = "documents"
@@ -84,6 +91,7 @@ class Settings(BaseSettings):
     embedding: EmbeddingSettings = EmbeddingSettings()
     reranker: RerankerSettings = RerankerSettings()
     verification: VerificationSettings = VerificationSettings()
+    summarization: SummarizationSettings = SummarizationSettings()
     qdrant: QdrantSettings = QdrantSettings()
     chunking: ChunkingSettings = ChunkingSettings()
     retrieval: RetrievalSettings = RetrievalSettings()

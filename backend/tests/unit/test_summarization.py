@@ -2,6 +2,7 @@
 
 from abstractrag.core.config import EmbeddingSettings, QdrantSettings
 from abstractrag.database.qdrant_store import QdrantStore
+from abstractrag.rag.models import Answer, SectionSummary
 from abstractrag.rag.summarization.sections import group_sections
 from tests.conftest import make_chunk
 
@@ -130,3 +131,16 @@ class TestListChunks:
 
     def test_an_unknown_document_yields_nothing(self):
         assert _store([]).list_chunks("doc-1") == []
+
+
+class TestSummaryModels:
+    def test_an_answer_carries_no_section_summaries_by_default(self):
+        # A normal retrieval answer has no sections; the field must stay optional.
+        assert Answer(text="x").section_summaries == []
+
+    def test_a_section_summary_keeps_every_chunk_it_covers(self):
+        # Verification resolves a marker to these chunks, so a partial list would
+        # silently narrow what a claim is checked against.
+        summary = SectionSummary(marker=1, section="2 Methods", text="s", chunk_ids=["a", "b"])
+
+        assert summary.chunk_ids == ["a", "b"]
