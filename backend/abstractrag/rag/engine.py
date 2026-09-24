@@ -4,7 +4,6 @@ It knows nothing about HTTP. Components are injected, so a test can swap the LLM
 or the store for a fake without touching this file.
 """
 
-import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 
@@ -19,13 +18,19 @@ from abstractrag.rag.generation import prompts
 from abstractrag.rag.generation.llm_client import LlamaCppClient
 from abstractrag.rag.ingestion.base import SourceInput
 from abstractrag.rag.ingestion.resolver import SourceResolver
-from abstractrag.rag.models import Answer, Citation, IngestResult, RetrievedChunk
+from abstractrag.rag.models import (
+    Answer,
+    Citation,
+    IngestResult,
+    RetrievedChunk,
+    VerifiedClaim,
+)
 from abstractrag.rag.reranking.cross_encoder import CrossEncoderReranker
 from abstractrag.rag.retrieval.hybrid import HybridRetriever
+from abstractrag.rag.verification.claims import split_claims
+from abstractrag.rag.verification.verifier import ClaimVerifier
 
 logger = get_logger(__name__)
-
-_CITATION_MARKER = re.compile(r"\[(\d+)\]")
 
 
 class AnswerEvent(BaseModel):
@@ -39,6 +44,19 @@ class AnswerEvent(BaseModel):
 
 
 @dataclass
+class _ContextSelection:
+    """Retrieval output plus whether it clears the abstain threshold.
+
+    Carries the chunks even when it does not clear the bar, so a failed question
+    stays diagnosable: was the right section never retrieved, or was it retrieved
+    and then rejected by the threshold? The two need different fixes.
+    """
+
+    chunks: list[RetrievedChunk]
+    sufficient: bool
+
+
+@dataclass
 class RagEngine:
     settings: Settings
     resolver: SourceResolver
@@ -48,6 +66,7 @@ class RagEngine:
     retriever: HybridRetriever
     reranker: CrossEncoderReranker
     llm: LlamaCppClient
+    verifier: ClaimVerifier
 
     def ingest(self, source: SourceInput) -> IngestResult:
         document = self.resolver.resolve(source)
@@ -71,10 +90,12 @@ class RagEngine:
         )
 
     def answer(self, question: str, document_id: str | None = None) -> Answer:
-        context_chunks = self._select_context(question, document_id)
-        if context_chunks is None:
-            return _abstain()
+        selection = self._select_context(question, document_id)
+        if not selection.sufficient:
+            return _abstain(selection.chunks)
 
+        self._free_gpu_for_llm()
+        context_chunks = selection.chunks
         # used_chunks keeps rank order (clearer for the debug UI); the LLM gets the
         # lost-in-the-middle order instead, and citation markers follow that order.
         context, citations = prompts.build_context(prompts.order_for_context(context_chunks))
@@ -86,16 +107,19 @@ class RagEngine:
             text=text,
             citations=_used_citations(text, citations),
             used_chunks=context_chunks,
+            verified_claims=self._verify(text, citations, context_chunks),
         )
 
     def stream_answer(
         self, question: str, document_id: str | None = None
     ) -> Iterator[AnswerEvent]:
-        context_chunks = self._select_context(question, document_id)
-        if context_chunks is None:
-            yield AnswerEvent(event="done", answer=_abstain())
+        selection = self._select_context(question, document_id)
+        if not selection.sufficient:
+            yield AnswerEvent(event="done", answer=_abstain(selection.chunks))
             return
 
+        self._free_gpu_for_llm()
+        context_chunks = selection.chunks
         context, citations = prompts.build_context(prompts.order_for_context(context_chunks))
         yield AnswerEvent(event="citations", citations=citations)
 
@@ -120,38 +144,73 @@ class RagEngine:
             yield AnswerEvent(event="done", answer=_abstain(context_chunks))
             return
 
+        text = collected.strip()
         yield AnswerEvent(
             event="done",
             answer=Answer(
-                text=collected.strip(),
-                citations=_used_citations(collected, citations),
+                text=text,
+                citations=_used_citations(text, citations),
                 used_chunks=context_chunks,
+                # Verification needs the whole answer, so it runs once the stream
+                # has finished and rides along in this final event.
+                verified_claims=self._verify(text, citations, context_chunks),
             ),
         )
 
-    def _select_context(
-        self, question: str, document_id: str | None
-    ) -> list[RetrievedChunk] | None:
+    def preview_retrieval(
+        self, question: str, document_id: str | None = None
+    ) -> tuple[list[RetrievedChunk], bool]:
+        """Retrieve + rerank without ever calling the LLM.
+
+        For ablation runs that only need recall@k/MRR: generation is the slow
+        part (tens of seconds per question), and retrieval metrics do not need
+        an answer, just the ranked chunks. `sufficient` matches what `answer()`
+        would have done - False means it would have abstained.
+        """
+        selection = self._select_context(question, document_id)
+        return selection.chunks, selection.sufficient
+
+    def _select_context(self, question: str, document_id: str | None) -> _ContextSelection:
         """Retrieve, rerank, and apply the abstain threshold.
 
-        Returns None when the source clearly has no answer, so the LLM is never
-        asked a question its context cannot support - the cheapest hallucination guard.
+        `sufficient=False` means the LLM is never asked a question its context
+        cannot support - the cheapest hallucination guard.
         """
         candidates = self.retriever.retrieve(question, document_id)
         if not candidates:
-            return None
+            return _ContextSelection(chunks=[], sufficient=False)
 
         top = self.reranker.rerank(question, candidates, self.settings.retrieval.context_size)
         if not top or top[0].effective_score < self.settings.retrieval.score_threshold:
             logger.info("abstaining: best score below threshold")
-            return None
+            return _ContextSelection(chunks=top, sufficient=False)
+        return _ContextSelection(chunks=top, sufficient=True)
 
-        # Embedder and reranker shared the GPU with the LLM one at a time, never
-        # concurrently - free their VRAM now so the LLM call isn't fighting them
-        # for memory (measured: this was a 6x slowdown on the LLM call otherwise).
+    def _verify(
+        self,
+        text: str,
+        citations: list[Citation],
+        chunks: list[RetrievedChunk],
+    ) -> list[VerifiedClaim]:
+        """Check each sentence against the passage it cited.
+
+        Only runs on answers that actually claimed something - an abstain never
+        reaches here, because there is nothing to check.
+        """
+        if not self.settings.verification.enabled:
+            return []
+        return self.verifier.verify(split_claims(text), citations, chunks)
+
+    def _free_gpu_for_llm(self) -> None:
+        """Embedder and reranker shared the GPU with the LLM one at a time, never
+        concurrently - free their VRAM right before an LLM call so it isn't
+        fighting them for memory (measured: this was a 6x slowdown otherwise).
+
+        Only called on the path that is about to call the LLM - preview_retrieval()
+        has no LLM call to make room for, so it skips this and stays fast.
+        """
         self.embedder.unload()
         self.reranker.unload()
-        return top
 
     def health(self) -> dict[str, bool]:
         return {
@@ -166,5 +225,5 @@ def _abstain(used: list[RetrievedChunk] | None = None) -> Answer:
 
 def _used_citations(text: str, citations: list[Citation]) -> list[Citation]:
     """Only return sources the answer actually pointed at."""
-    markers = {int(marker) for marker in _CITATION_MARKER.findall(text)}
+    markers = {int(marker) for marker in prompts.CITATION_MARKER.findall(text)}
     return [citation for citation in citations if citation.marker in markers]

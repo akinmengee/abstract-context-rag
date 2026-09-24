@@ -170,10 +170,10 @@ mechanism behind "re-ingesting replaces instead of duplicates."
 | `generation/prompts.py` | System prompt, context ordering, citation numbering | ✅ |
 | `generation/llm_client.py` | Thin HTTP client for llama.cpp's OpenAI-compatible API | ✅ |
 | `query/` | Query rewriting, HyDE, routing | ⬜ phase 3 |
-| `verification/` | Claim decomposition + NLI/LLM-judge citation checking | ⬜ phase 3 |
+| `verification/` | Sentence-level claim decomposition + one batched LLM-judge call per answer; flags unsupported and uncited claims | 🚧 phase 3 |
 | `summarization/` | Map-reduce, then RAPTOR | ⬜ phase 3 / 6 |
 | `agents/` | Corrective / self-reflective / multi-hop RAG | ⬜ phase 4 |
-| `evaluation/` | Golden dataset, retrieval + RAGAS metrics, ablation runner | ⬜ phase 1-2 |
+| `evaluation/` | Golden dataset, self-implemented metrics (recall@k, MRR, abstain accuracy, LLM-judge faithfulness), ablation runner | 🚧 phase 1-2 |
 
 Each `⬜` package already exists with a docstring in its `__init__.py` explaining
 what will live there and which roadmap phase it belongs to — see `docs/roadmap.md`

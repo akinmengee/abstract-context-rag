@@ -39,6 +39,12 @@ reranker:
   device: "cuda"
   enabled: true
 
+verification:
+  # Checks every claim in an answer against the passage it cited, in one extra
+  # LLM call. Costs ~20-60s per answered question; ACR_VERIFICATION__ENABLED=false
+  # turns it off while working on something else.
+  enabled: true
+
 qdrant:
   url: "http://localhost:6333"
   collection: "documents"
@@ -56,7 +62,11 @@ retrieval:
   context_size: 5
   rrf_k: 60
   # Below this reranker score the question is answered with an abstain instead of the LLM.
-  score_threshold: 0.3
+  # Measured on the golden set (2026-09-20, 11 questions): correctly-answerable
+  # questions scored as low as 0.16, incorrectly-abstained ones scored up to 0.09 -
+  # 0.3 was rejecting a correct retrieval. Revisit once the golden set grows past
+  # one paper; this gap is narrow on 11 samples.
+  score_threshold: 0.12
 
 ingestion:
   # Downloaded PDFs and parser output land here (gitignored).

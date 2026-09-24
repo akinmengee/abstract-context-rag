@@ -36,6 +36,13 @@ class RerankerSettings(BaseModel):
     enabled: bool = True
 
 
+class VerificationSettings(BaseModel):
+    # One extra LLM call per answered question. On by default because flagging
+    # unsupported claims is product behaviour, not a debug aid; turn it off with
+    # ACR_VERIFICATION__ENABLED=false while iterating on anything else.
+    enabled: bool = True
+
+
 class QdrantSettings(BaseModel):
     url: str = "http://localhost:6333"
     collection: str = "documents"
@@ -76,6 +83,7 @@ class Settings(BaseSettings):
     llm: LLMSettings = LLMSettings()
     embedding: EmbeddingSettings = EmbeddingSettings()
     reranker: RerankerSettings = RerankerSettings()
+    verification: VerificationSettings = VerificationSettings()
     qdrant: QdrantSettings = QdrantSettings()
     chunking: ChunkingSettings = ChunkingSettings()
     retrieval: RetrievalSettings = RetrievalSettings()

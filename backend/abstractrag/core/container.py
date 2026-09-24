@@ -16,11 +16,13 @@ from abstractrag.rag.generation.llm_client import LlamaCppClient
 from abstractrag.rag.ingestion.resolver import SourceResolver
 from abstractrag.rag.reranking.cross_encoder import CrossEncoderReranker
 from abstractrag.rag.retrieval.hybrid import HybridRetriever
+from abstractrag.rag.verification.verifier import ClaimVerifier
 
 
 def build_engine(settings: Settings) -> RagEngine:
     embedder = BgeM3Embedder(settings.embedding)
     store = QdrantStore(settings.qdrant, settings.embedding)
+    llm = LlamaCppClient(settings.llm)
     return RagEngine(
         settings=settings,
         resolver=SourceResolver(settings.ingestion),
@@ -29,7 +31,10 @@ def build_engine(settings: Settings) -> RagEngine:
         store=store,
         retriever=HybridRetriever(store, embedder, settings.retrieval),
         reranker=CrossEncoderReranker(settings.reranker),
-        llm=LlamaCppClient(settings.llm),
+        llm=llm,
+        # The judge is the same local model that answered - no second model to
+        # load, and it already has the VRAM.
+        verifier=ClaimVerifier(llm),
     )
 
 

@@ -104,12 +104,31 @@ class Citation(BaseModel):
     origin: str
 
 
+class ClaimVerdict(str, Enum):
+    SUPPORTED = "supported"  # the cited passage backs this claim
+    UNSUPPORTED = "unsupported"  # it cites something, but that passage does not say this
+    UNCITED = "uncited"  # asserted with no source at all
+
+
+class VerifiedClaim(BaseModel):
+    """One sentence of an answer, checked against the passage it cited."""
+
+    text: str
+    markers: list[int] = Field(default_factory=list)
+    verdict: ClaimVerdict
+    # Only failures need explaining, so this stays empty for supported claims.
+    reason: str = ""
+
+
 class Answer(BaseModel):
     text: str
     citations: list[Citation] = Field(default_factory=list)
     # True when retrieval was too weak or the model reported the source has no answer.
     abstained: bool = False
     used_chunks: list[RetrievedChunk] = Field(default_factory=list)
+    # Empty when verification is disabled, or when the answer abstained and so
+    # claimed nothing to check.
+    verified_claims: list[VerifiedClaim] = Field(default_factory=list)
 
 
 class IngestResult(BaseModel):

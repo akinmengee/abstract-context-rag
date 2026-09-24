@@ -2,10 +2,10 @@
 
 from collections.abc import Iterator
 
-from abstractrag.core.config import RetrievalSettings, Settings
+from abstractrag.core.config import RetrievalSettings, Settings, VerificationSettings
 from abstractrag.rag.engine import RagEngine
 from abstractrag.rag.generation.prompts import ABSTAIN_MESSAGE, ABSTAIN_SENTINEL
-from abstractrag.rag.models import RetrievedChunk
+from abstractrag.rag.models import ClaimVerdict, RetrievedChunk, VerifiedClaim
 from tests.conftest import make_chunk
 
 
@@ -57,10 +57,34 @@ class FakeLLM:
             yield self.response[index : index + 4]
 
 
+class FakeVerifier:
+    """Marks every cited claim supported; counts calls so tests can check it ran."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def verify(self, claims, citations, chunks) -> list[VerifiedClaim]:
+        self.calls += 1
+        return [
+            VerifiedClaim(
+                text=claim.text,
+                markers=claim.markers,
+                verdict=ClaimVerdict.SUPPORTED if claim.markers else ClaimVerdict.UNCITED,
+            )
+            for claim in claims
+        ]
+
+
 def build_engine(
-    candidates: list[RetrievedChunk], scores: list[float], response: str
+    candidates: list[RetrievedChunk],
+    scores: list[float],
+    response: str,
+    verification_enabled: bool = True,
 ) -> RagEngine:
-    settings = Settings(retrieval=RetrievalSettings(context_size=3, score_threshold=0.3))
+    settings = Settings(
+        retrieval=RetrievalSettings(context_size=3, score_threshold=0.3),
+        verification=VerificationSettings(enabled=verification_enabled),
+    )
     return RagEngine(
         settings=settings,
         resolver=None,
@@ -70,6 +94,7 @@ def build_engine(
         retriever=FakeRetriever(candidates),
         reranker=FakeReranker(scores),
         llm=FakeLLM(response),
+        verifier=FakeVerifier(),
     )
 
 
@@ -130,6 +155,26 @@ def test_context_uses_lost_in_the_middle_order_not_raw_rank_order():
     assert [chunk.chunk.metadata.page for chunk in answer.used_chunks] == [1, 2, 3]
 
 
+def test_threshold_abstain_still_reports_what_was_retrieved():
+    # Diagnosis matters: "the right section was never retrieved" and "it was
+    # retrieved but the threshold rejected it" need different fixes.
+    engine = build_engine([candidate("weak", 0)], [0.05], "should never be used")
+
+    answer = engine.answer("unrelated question")
+
+    assert answer.abstained
+    assert [chunk.chunk.text for chunk in answer.used_chunks] == ["weak"]
+
+
+def test_abstain_with_nothing_retrieved_reports_an_empty_context():
+    engine = build_engine([], [], "should never be used")
+
+    answer = engine.answer("unrelated question")
+
+    assert answer.abstained
+    assert answer.used_chunks == []
+
+
 def test_embedder_and_reranker_are_freed_before_calling_the_llm():
     engine = build_engine([candidate("relevant", 0)], [0.9], "Grounded answer [1].")
 
@@ -167,3 +212,96 @@ def test_stream_never_leaks_the_abstain_sentinel_as_tokens():
 
     assert [event.event for event in events] == ["citations", "done"]
     assert events[-1].answer.abstained
+
+
+class TestVerification:
+    def test_answer_carries_verified_claims_when_enabled(self):
+        engine = build_engine([candidate("relevant", 0)], [0.9], "DPR is the retriever [1].")
+
+        answer = engine.answer("question")
+
+        assert [claim.verdict for claim in answer.verified_claims] == [ClaimVerdict.SUPPORTED]
+        assert engine.verifier.calls == 1
+
+    def test_verification_is_skipped_when_disabled(self):
+        engine = build_engine(
+            [candidate("relevant", 0)],
+            [0.9],
+            "DPR is the retriever [1].",
+            verification_enabled=False,
+        )
+
+        answer = engine.answer("question")
+
+        assert answer.verified_claims == []
+        assert engine.verifier.calls == 0
+
+    def test_abstained_answers_are_never_verified(self):
+        # Nothing was claimed, so there is nothing to check.
+        engine = build_engine([candidate("weak", 0)], [0.05], "should never be used")
+
+        answer = engine.answer("question")
+
+        assert answer.abstained
+        assert answer.verified_claims == []
+        assert engine.verifier.calls == 0
+
+    def test_a_sentinel_abstain_is_not_verified_either(self):
+        engine = build_engine([candidate("relevant", 0)], [0.9], ABSTAIN_SENTINEL)
+
+        answer = engine.answer("question")
+
+        assert answer.abstained
+        assert answer.verified_claims == []
+        assert engine.verifier.calls == 0
+
+    def test_streaming_reports_verification_in_the_final_done_event(self):
+        engine = build_engine([candidate("relevant", 0)], [0.9], "DPR is the retriever [1].")
+
+        events = list(engine.stream_answer("question"))
+
+        assert events[-1].event == "done"
+        verdicts = [claim.verdict for claim in events[-1].answer.verified_claims]
+        assert verdicts == [ClaimVerdict.SUPPORTED]
+
+
+class TestPreviewRetrieval:
+    """Retrieval-only path: for ablation runs that only need recall@k/MRR, not
+    an actual answer. Must never touch the LLM - that is the whole point."""
+
+    def test_returns_chunks_and_sufficient_true_above_threshold(self):
+        engine = build_engine([candidate("relevant", 0)], [0.9], "should never be used")
+
+        chunks, sufficient = engine.preview_retrieval("question")
+
+        assert sufficient
+        assert [chunk.chunk.text for chunk in chunks] == ["relevant"]
+        assert engine.llm.calls == 0
+
+    def test_returns_chunks_and_sufficient_false_below_threshold(self):
+        engine = build_engine([candidate("weak", 0)], [0.05], "should never be used")
+
+        chunks, sufficient = engine.preview_retrieval("question")
+
+        assert not sufficient
+        assert [chunk.chunk.text for chunk in chunks] == ["weak"]  # still diagnosable
+        assert engine.llm.calls == 0
+
+    def test_returns_empty_and_sufficient_false_when_nothing_retrieved(self):
+        engine = build_engine([], [], "should never be used")
+
+        chunks, sufficient = engine.preview_retrieval("question")
+
+        assert not sufficient
+        assert chunks == []
+        assert engine.llm.calls == 0
+
+    def test_never_unloads_the_gpu_since_no_llm_call_follows(self):
+        # unload-before-LLM only makes sense when an LLM call is about to
+        # happen; here it would just force a ~25s reload for nothing.
+        engine = build_engine([candidate("relevant", 0)], [0.9], "unused")
+
+        engine.preview_retrieval("question")
+
+        assert not engine.embedder.unloaded
+        assert not engine.reranker.unloaded

@@ -46,6 +46,17 @@ def ask(question: str, document_id: str) -> tuple[str, list[list]]:
     )
     text = answer["text"] + (f"\n\nSources:\n{sources}" if sources else "")
 
+    # Flagged claims belong next to the answer, not buried in the API response -
+    # an unsupported sentence is exactly what someone reading this panel needs to see.
+    claims = answer.get("verified_claims") or []
+    if claims:
+        failed = [claim for claim in claims if claim["verdict"] != "supported"]
+        supported = len(claims) - len(failed)
+        text += f"\n\nVerification: {supported}/{len(claims)} claims supported"
+        for claim in failed:
+            reason = f" — {claim['reason']}" if claim["reason"] else ""
+            text += f"\n  ! {claim['verdict']}: \"{claim['text']}\"{reason}"
+
     # The retrieval table is the point of this panel: it shows why the answer looks
     # the way it does, including when the engine abstained.
     rows = [

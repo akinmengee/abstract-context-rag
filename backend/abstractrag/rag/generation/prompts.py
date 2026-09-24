@@ -1,6 +1,14 @@
 """Prompts and context assembly for grounded answering."""
 
+import re
+
 from abstractrag.rag.models import Citation, RetrievedChunk
+
+# build_context() below is what stamps "[1]", "[2]" onto the context blocks, so
+# the pattern for reading them back out lives here too - one source of truth for
+# the marker format, shared by the engine (which citations were used?) and
+# verification (which passage does this claim lean on?).
+CITATION_MARKER = re.compile(r"\[(\d+)\]")
 
 # The model returns this exact token when the context cannot answer the question,
 # which is cheaper and far more reliable than detecting a hedged answer afterwards.
