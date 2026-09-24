@@ -109,8 +109,55 @@ Done:
   - Cost: one extra LLM call per answered question. A real two-claim answer went
     from ~70s to ~200s end to end. `ACR_VERIFICATION__ENABLED=false` turns it off.
 
+- **Map-reduce summarisation** (2026-09-24): `rag/summarization/` - `sections.py`
+  groups a document's chunks into top-level-section groups (pure code, no LLM),
+  `map_reduce.py` summarises each group from its real source text (map), then
+  writes the final answer from those summaries (reduce), citing `[n]` = section.
+  `RagEngine.summarize()`, `abstractrag summarize --document-id --question`,
+  `POST /api/v1/summarize`, and a Gradio "Summarize" tab. Verification resolves
+  a marker to the section's real source chunks, never the intermediate summary -
+  the same anti-hallucination property citation verification established, applied
+  one level up.
+  - **The core measurement, run against the real model (RAG paper, 2026-09-24)**:
+    asked *"What is the main contribution of this paper?"* through both paths.
+    `ask` (top-k retrieval) **abstained** - "This source does not contain that
+    information" - the reranker never surfaced a chunk that scores this global
+    question above threshold, because no single chunk states the paper's
+    contribution; it is spread across the abstract, introduction and results.
+    `summarize --question "..."` answered correctly and concisely: *"The main
+    contribution is retrieval-augmented generation (RAG), a method that combines
+    pre-trained parametric memory with non-parametric memory through a
+    general-purpose fine-tuning approach [2]"* (`verification: 1/1 claims
+    supported`). This is the failure top-k retrieval cannot fix by construction
+    (rag.md 8) and map-reduce was built to solve - confirmed, not assumed.
+  - **Question-awareness confirmed**: the same document produced two different
+    outputs - a full 9-sentence summary with no `--question`, and the single
+    focused sentence above with one. The question reaches the map prompt, not
+    just the reduce prompt.
+  - **Real cost, and it's higher than planned**: the RAG paper's chunks group
+    into **32 sections**, not the ~7 estimated in rag.md 8.1 - `section_path[0]`
+    does not collapse "2.1 Models" under "2 Methods" the way assumed; every
+    subsection heading is its own top-level group. 32 map calls + 1 reduce =
+    **~27 minutes** for a plain summary (a focused question ran faster, ~16 min,
+    once Ollama had already served several requests this run - variance between
+    the two runs was substantial call-to-call). Revisit the grouping key once
+    a second, longer document is ingested (rag.md 8.1, `group_sections`).
+  - **Real, unfixed finding: verification silently fails to parse on a summary's
+    claim set.** The 9-claim plain-summary run came back `verification: 0/9`,
+    every claim `"the judge returned no readable verdict for this claim"` - not
+    a hallucination finding, a judge-output-parsing failure. The 1-claim focused
+    run parsed fine. Suspected cause: the same Qwen3 "thinking" token-budget
+    problem already seen in the map stage (`finish_reason=length`,
+    `reasoning_chars` in the thousands, see the two warnings logged during the
+    32-section map run) - a 9-claim judge prompt is large enough to hit it even
+    though `"think": false` is sent. Not yet fixed; logged here rather than
+    guessed at. Candidate fixes for later: raise `llm.max_tokens` for the judge
+    call specifically, or verify a summary's claims in smaller batches.
+
 Next:
+- Fix or work around the verification parsing failure on larger claim sets
+  (see the finding above) before trusting `summarize`'s verification numbers
 - Measure it: add a verification metric to the eval harness so "faithfulness
   before/after verification" (this phase's stated measure) becomes a number
-- Query routing (specific vs global questions)
-- Map-reduce summarisation for global questions
+- Query routing (specific vs global questions) - the one Phase 3 sub-feature
+  still unbuilt; now that both pipelines exist, routing has somewhere to route
