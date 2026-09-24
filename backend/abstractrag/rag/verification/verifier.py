@@ -37,10 +37,21 @@ class ClaimVerifier:
         citations: list[Citation],
         chunks: list[RetrievedChunk],
     ) -> list[VerifiedClaim]:
+        """Check an answer's claims against the chunks its citations point at."""
+        return self.verify_passages(claims, _passages_by_marker(citations, chunks))
+
+    def verify_passages(
+        self, claims: list[Claim], passages: dict[int, str]
+    ) -> list[VerifiedClaim]:
+        """Judge claims against passages the caller already resolved by marker.
+
+        A summary's marker is a whole section rather than one chunk, so the
+        mapping differs but the judging must not: the batched call, the claim
+        numbering and the rule that an unreadable verdict fails are shared.
+        """
         if not claims:
             return []
 
-        passages = _passages_by_marker(citations, chunks)
         # Keep each claim's position in the full answer: uncited claims and ones
         # citing a passage that is not there never reach the judge, and the
         # numbering the judge replies with has to line up with the full list.

@@ -155,3 +155,32 @@ class TestClaimVerifier:
         assert results[0].verdict is ClaimVerdict.UNCITED
         assert results[1].verdict is ClaimVerdict.UNSUPPORTED
         assert "something else" in results[1].reason
+
+
+class TestVerifyPassages:
+    def test_claims_are_judged_against_passages_given_directly(self):
+        # Summarisation resolves its own markers, so it needs a way in that does
+        # not go through citations and retrieved chunks.
+        verifier = ClaimVerifier(FakeLlm("1|YES|"))
+
+        results = verifier.verify_passages(
+            [Claim(text="DPR is the retriever [1].", markers=[1])],
+            {1: "We use DPR as the retriever."},
+        )
+
+        assert [result.verdict for result in results] == [ClaimVerdict.SUPPORTED]
+
+    def test_a_marker_with_no_passage_is_unsupported_not_skipped(self):
+        verifier = ClaimVerifier(FakeLlm("1|YES|"))
+
+        results = verifier.verify_passages(
+            [Claim(text="Trained on 4096 TPUs [7].", markers=[7])], {1: "some text"}
+        )
+
+        assert results[0].verdict is ClaimVerdict.UNSUPPORTED
+
+    def test_no_claims_means_no_judge_call(self):
+        llm = FakeLlm("1|YES|")
+
+        assert ClaimVerifier(llm).verify_passages([], {1: "text"}) == []
+        assert llm.calls == 0
