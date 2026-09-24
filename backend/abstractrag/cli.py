@@ -17,6 +17,7 @@ from abstractrag.rag.evaluation.models import EvaluationReport
 from abstractrag.rag.evaluation.runner import DEFAULT_GOLDEN_SET, load_golden_set, run_evaluation
 from abstractrag.rag.ingestion.base import SourceInput
 from abstractrag.rag.models import ClaimVerdict, VerifiedClaim
+from abstractrag.rag.query.router import is_global_question
 
 app = typer.Typer(help="Local RAG engine for research papers and Wikipedia.", no_args_is_help=True)
 
@@ -44,9 +45,20 @@ def ask(
     question: str,
     document_id: str = typer.Option(None, "--document-id", help="Limit to one document"),
 ) -> None:
-    """Ask a question and print the grounded answer with its citations."""
+    """Ask a question and print the grounded answer with its citations.
+
+    A global question (e.g. "summarize this paper") with a --document-id is
+    routed to a full-document summary instead of a retrieval answer - see
+    RagEngine.ask(). That can take several minutes rather than seconds.
+    """
     setup_logging()
-    answer = get_engine().answer(question, document_id)
+    if document_id and is_global_question(question):
+        typer.echo(
+            "Global question detected - summarising the whole document, "
+            "this can take several minutes.",
+            err=True,
+        )
+    answer = get_engine().ask(question, document_id)
     typer.echo(answer.text)
     for citation in answer.citations:
         location = citation.section or (f"page {citation.page}" if citation.page else "")

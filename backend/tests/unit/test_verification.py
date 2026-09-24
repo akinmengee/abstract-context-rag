@@ -56,10 +56,12 @@ class FakeLlm:
         self.response = response
         self.calls = 0
         self.last_prompt = ""
+        self.last_max_tokens = None
 
-    def complete(self, messages: list[dict[str, str]]) -> str:
+    def complete(self, messages: list[dict[str, str]], max_tokens: int | None = None) -> str:
         self.calls += 1
         self.last_prompt = messages[-1]["content"]
+        self.last_max_tokens = max_tokens
         return self.response
 
 
@@ -184,3 +186,25 @@ class TestVerifyPassages:
 
         assert ClaimVerifier(llm).verify_passages([], {1: "text"}) == []
         assert llm.calls == 0
+
+
+class TestJudgeMaxTokens:
+    def test_the_judge_call_uses_the_configured_max_tokens(self):
+        # Not 8192 (ClaimVerifier's own default) on purpose: if __init__ ever
+        # dropped judge_max_tokens, or _ask_judge hardcoded 8192 instead of
+        # reading self.judge_max_tokens, this would still pass with a default
+        # value but must fail with a non-default one.
+        llm = FakeLlm("1|YES|")
+        verifier = ClaimVerifier(llm, judge_max_tokens=2048)
+
+        verifier.verify_passages([Claim(text="DPR is the retriever [1].", markers=[1])], {1: "x"})
+
+        assert llm.last_max_tokens == 2048
+
+    def test_judge_max_tokens_defaults_when_the_caller_does_not_specify_one(self):
+        llm = FakeLlm("1|YES|")
+        verifier = ClaimVerifier(llm)  # no judge_max_tokens given
+
+        verifier.verify_passages([Claim(text="DPR is the retriever [1].", markers=[1])], {1: "x"})
+
+        assert llm.last_max_tokens == 8192

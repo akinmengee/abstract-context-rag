@@ -57,6 +57,18 @@ def ask(question: str, document_id: str) -> tuple[str, list[list]]:
             reason = f" — {claim['reason']}" if claim["reason"] else ""
             text += f"\n  ! {claim['verdict']}: \"{claim['text']}\"{reason}"
 
+    # A global question ("summarize this paper") can get routed to a full-document
+    # summary instead of a retrieval answer - used_chunks is then always empty and
+    # section_summaries holds the real content, so render that instead of leaving
+    # the table blank with no explanation.
+    summaries = answer.get("section_summaries") or []
+    if summaries:
+        rows = [
+            [summary["marker"], summary["section"], "", summary["text"]]
+            for summary in summaries
+        ]
+        return text, rows
+
     # The retrieval table is the point of this panel: it shows why the answer looks
     # the way it does, including when the engine abstained.
     rows = [

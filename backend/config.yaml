@@ -44,6 +44,10 @@ verification:
   # LLM call. Costs ~20-60s per answered question; ACR_VERIFICATION__ENABLED=false
   # turns it off while working on something else.
   enabled: true
+  # Own budget, larger than a normal answer's: a big claim set (measured: 9
+  # claims) can exhaust the default llm.max_tokens during Qwen3's thinking
+  # pass before any verdict line gets written.
+  judge_max_tokens: 8192
 
 summarization:
   # One LLM call per group; raising this means fewer, larger calls.

@@ -7,8 +7,10 @@ folder noticing.
 
 Two things happen here: **ingest** turns a source into searchable chunks, and
 **answer** turns a question into a grounded, cited response. Both are one method
-call on `RagEngine` (`engine.ingest()`, `engine.answer()` /
-`engine.stream_answer()`) that walks through every module below in order.
+call on `RagEngine` (`engine.ingest()`, `engine.ask()` — which routes to
+`engine.answer()` / `engine.stream_answer()` or `engine.summarize()` — plus
+directly calling any of those three) that walks through every module below in
+order.
 
 ## Flow 1 — ingest
 
@@ -185,7 +187,7 @@ mechanism behind "re-ingesting replaces instead of duplicates."
 
 | Path | Role | Status |
 |---|---|---|
-| `engine.py` | `RagEngine` — the only entry point (`ingest`, `answer`, `stream_answer`, `health`) | ✅ |
+| `engine.py` | `RagEngine` — the only entry point (`ingest`, `ask`, `answer`, `stream_answer`, `summarize`, `health`) | ✅ |
 | `models.py` | Shared types: `ParsedDocument`, `Chunk`, `RetrievedChunk`, `Answer`, `Citation`... | ✅ |
 | `ingestion/base.py` | `SourceInput` — enforces "exactly one source" | ✅ |
 | `ingestion/resolver.py` | Picks fetcher + adapter for a `SourceInput`, returns a `ParsedDocument` | ✅ |
@@ -200,7 +202,7 @@ mechanism behind "re-ingesting replaces instead of duplicates."
 | `reranking/cross_encoder.py` | Candidates → top-N, scored by a cross-encoder | ✅ |
 | `generation/prompts.py` | System prompt, context ordering, citation numbering | ✅ |
 | `generation/llm_client.py` | Thin HTTP client for llama.cpp's OpenAI-compatible API | ✅ |
-| `query/` | Query rewriting, HyDE, routing | ⬜ phase 3 |
+| `query/` | Keyword-based routing between retrieval and map-reduce built; rewriting, multi-query, HyDE, step-back, decomposition still to come | 🚧 phase 3 |
 | `verification/` | Sentence-level claim decomposition + one batched LLM-judge call per answer; flags unsupported and uncited claims | 🚧 phase 3 |
 | `summarization/` | Map-reduce built; RAPTOR still to come | 🚧 phase 3 / 6 |
 | `agents/` | Corrective / self-reflective / multi-hop RAG | ⬜ phase 4 |

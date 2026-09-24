@@ -142,22 +142,56 @@ Done:
     once Ollama had already served several requests this run - variance between
     the two runs was substantial call-to-call). Revisit the grouping key once
     a second, longer document is ingested (rag.md 8.1, `group_sections`).
-  - **Real, unfixed finding: verification silently fails to parse on a summary's
-    claim set.** The 9-claim plain-summary run came back `verification: 0/9`,
-    every claim `"the judge returned no readable verdict for this claim"` - not
-    a hallucination finding, a judge-output-parsing failure. The 1-claim focused
-    run parsed fine. Suspected cause: the same Qwen3 "thinking" token-budget
-    problem already seen in the map stage (`finish_reason=length`,
-    `reasoning_chars` in the thousands, see the two warnings logged during the
-    32-section map run) - a 9-claim judge prompt is large enough to hit it even
-    though `"think": false` is sent. Not yet fixed; logged here rather than
-    guessed at. Candidate fixes for later: raise `llm.max_tokens` for the judge
-    call specifically, or verify a summary's claims in smaller batches.
+  - **Real finding, attempted fix, still unresolved: verification silently fails
+    to parse on a summary's claim set.** The 9-claim plain-summary run came back
+    `verification: 0/9`, every claim `"the judge returned no readable verdict for
+    this claim"` - not a hallucination finding, a judge-output-parsing failure.
+    The 1-claim focused run parsed fine.
+
+- **Query routing** (2026-09-24): `rag/query/router.py::is_global_question()` -
+  a pure, LLM-free keyword classifier (multi-word phrases anchored to "this/the
+  paper/document/article/study", not bare words - a bare "summary"/"overview"/
+  "key result" would wrongly match table- or figure-specific questions).
+  `RagEngine.ask(question, document_id)` is the new default entry point for
+  `abstractrag ask` and `POST /api/v1/chat`: routes to `summarize()` only when
+  both a document is scoped and the question looks global, otherwise `answer()`
+  as before. `POST /api/v1/summarize`, `abstractrag summarize`, and
+  `/chat/stream` stay unrouted on purpose (streaming has no map-reduce path).
+  - **The routing feature's own proof, run against the real model (2026-09-24)**:
+    `abstractrag ask "What is the main contribution of this paper?" --document-id
+    <id>` - the exact question that made plain `ask` abstain two runs earlier -
+    now prints `Global question detected - summarising the whole document...`
+    and returns the correct, verified answer (`verification: 1/1 claims
+    supported`) in ~13 minutes, with no `--question` flag and no need to know
+    `summarize` exists. A specific question through the same `ask` command
+    (`"What retriever does this paper use?"`) still answers normally in ~106s,
+    confirming routing does not change existing behaviour.
+
+  **Verification fix attempted (2026-09-24) and it did not work on the real
+  model - recorded honestly rather than claimed fixed:** `judge_max_tokens`
+  (a dedicated, larger token budget for the judge call only - `verifier.py`,
+  `VerificationSettings.judge_max_tokens=8192`) was implemented, unit-tested,
+  and reviewed clean. Re-running the exact same 9-claim summary against the
+  real model produced **the identical result**: `verification: 0/9`, every
+  claim unreadable - `judge_max_tokens=8192` made no observable difference.
+  The judge call logged no "empty content" warning this time (unlike the map
+  calls, which did hit `finish_reason=length` on this same run) - meaning the
+  response was non-empty, just never contained a parseable `<n>|YES/NO|<reason>`
+  line for any of the 9 claims. Leading suspect, not yet confirmed: `llm.ctx_size`
+  (4096, `config.yaml`) is configured but **never actually sent to Ollama** -
+  `llm_client.py`'s `_payload()` has no `num_ctx`/`options` field at all - so
+  raising `max_tokens` cannot help if the server-side context window is the
+  real ceiling. This needs its own investigation (capture the judge's raw
+  response, or try wiring `num_ctx` through) rather than a second guess stacked
+  on the first one.
 
 Next:
-- Fix or work around the verification parsing failure on larger claim sets
-  (see the finding above) before trusting `summarize`'s verification numbers
+- **Diagnose the verification parsing failure properly** - capture the judge's
+  actual raw response (not just "empty" or "unreadable") on a multi-claim call,
+  and confirm or rule out the unset `ctx_size` before trying another fix.
+  `summarize`'s verification numbers are not trustworthy on large claim sets
+  until this is resolved.
 - Measure it: add a verification metric to the eval harness so "faithfulness
   before/after verification" (this phase's stated measure) becomes a number
-- Query routing (specific vs global questions) - the one Phase 3 sub-feature
-  still unbuilt; now that both pipelines exist, routing has somewhere to route
+- Phase 2 leftover: chunking-variant ablation (target size, overlap) - deferred
+  alongside the item above, per the same batching decision

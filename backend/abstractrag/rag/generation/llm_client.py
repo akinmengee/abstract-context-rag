@@ -20,8 +20,8 @@ class LlamaCppClient:
     def __init__(self, settings: LLMSettings) -> None:
         self.settings = settings
 
-    def complete(self, messages: list[dict[str, str]]) -> str:
-        payload = self._payload(messages, stream=False)
+    def complete(self, messages: list[dict[str, str]], max_tokens: int | None = None) -> str:
+        payload = self._payload(messages, stream=False, max_tokens=max_tokens)
         try:
             response = httpx.post(
                 f"{self.settings.base_url}/chat/completions",
@@ -73,12 +73,14 @@ class LlamaCppClient:
         except httpx.HTTPError:
             return False
 
-    def _payload(self, messages: list[dict[str, str]], stream: bool) -> dict:
+    def _payload(
+        self, messages: list[dict[str, str]], stream: bool, max_tokens: int | None = None
+    ) -> dict:
         return {
             "model": self.settings.model,
             "messages": messages,
             "temperature": self.settings.temperature,
-            "max_tokens": self.settings.max_tokens,
+            "max_tokens": max_tokens if max_tokens is not None else self.settings.max_tokens,
             "stream": stream,
             # Ollama-specific: hybrid models like Qwen3 default to a chain-of-thought
             # pass before answering, which we never read (see engine.py) and only

@@ -27,6 +27,7 @@ from abstractrag.rag.models import (
     SectionSummary,
     VerifiedClaim,
 )
+from abstractrag.rag.query.router import is_global_question
 from abstractrag.rag.reranking.cross_encoder import CrossEncoderReranker
 from abstractrag.rag.retrieval.hybrid import HybridRetriever
 from abstractrag.rag.summarization import prompts as summary_prompts
@@ -97,6 +98,24 @@ class RagEngine:
             chunk_count=len(chunks),
             page_count=max(pages) if pages else None,
         )
+
+    def ask(self, question: str, document_id: str | None = None) -> Answer:
+        """Route a question to retrieval or map-reduce summarisation.
+
+        A specific question is answered from the top-k; a global one
+        ("summarize this paper") cannot be - top-k structurally misses most of
+        the answer (rag.md 8, 7.4.1). `summarize()` needs one document to scope
+        to, so a global-sounding question with no document_id still falls
+        through to answer() rather than guessing which document to summarise.
+
+        This is what `/api/v1/chat` and `abstractrag ask` call by default.
+        Callers that want one specific path regardless of phrasing use
+        answer() or summarize() directly - `/api/v1/summarize` and
+        `abstractrag summarize` are unrouted on purpose.
+        """
+        if document_id and is_global_question(question):
+            return self.summarize(question, document_id)
+        return self.answer(question, document_id)
 
     def answer(self, question: str, document_id: str | None = None) -> Answer:
         selection = self._select_context(question, document_id)

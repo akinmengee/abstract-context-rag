@@ -35,7 +35,7 @@ def build_engine(settings: Settings) -> RagEngine:
         llm=llm,
         # The judge is the same local model that answered - no second model to
         # load, and it already has the VRAM.
-        verifier=ClaimVerifier(llm),
+        verifier=ClaimVerifier(llm, judge_max_tokens=settings.verification.judge_max_tokens),
         summarizer=MapReduceSummarizer(llm=llm, settings=settings.summarization),
     )
 

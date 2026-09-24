@@ -425,3 +425,43 @@ class TestSummarize:
 
         question_asked, _ = engine.summarizer.calls[0]
         assert question_asked  # not None/empty - the summarizer always gets a request
+
+
+class TestAsk:
+    def test_a_specific_question_is_answered_normally(self):
+        engine = build_engine([candidate("relevant", 0)], [0.9], "Grounded answer [1].")
+
+        answer = engine.ask("What retriever does this paper use?", "doc-1")
+
+        assert answer.section_summaries == []
+        assert answer.text == "Grounded answer [1]."
+
+    def test_a_global_question_with_a_document_id_routes_to_summarize(self):
+        chunks = [make_chunk("real source text", index=0, section_path=["2 Methods"])]
+        summaries = [
+            SectionSummary(marker=1, section="2 Methods", text="s", chunk_ids=[chunks[0].chunk_id])
+        ]
+        engine = build_engine(
+            [], [], "unused",
+            store=FakeStore(chunks),
+            summarizer=FakeSummarizer("Final [1].", summaries),
+        )
+
+        answer = engine.ask("Summarize this paper.", "doc-1")
+
+        assert answer.section_summaries != []
+        assert engine.summarizer.calls
+
+    def test_a_global_question_without_a_document_id_falls_back_to_answering(self):
+        # summarize() needs one document to scope to - there is no "summarize
+        # everything ever ingested" design, so an unscoped global-sounding
+        # question still goes through retrieval like any other question.
+        engine = build_engine(
+            [candidate("relevant", 0)], [0.9], "Grounded answer [1].",
+            summarizer=FakeSummarizer("unused", []),
+        )
+
+        answer = engine.ask("Summarize this paper.")
+
+        assert answer.section_summaries == []
+        assert engine.summarizer.calls == []

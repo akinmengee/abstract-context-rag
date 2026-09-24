@@ -41,6 +41,12 @@ class VerificationSettings(BaseModel):
     # unsupported claims is product behaviour, not a debug aid; turn it off with
     # ACR_VERIFICATION__ENABLED=false while iterating on anything else.
     enabled: bool = True
+    # Headroom for Qwen3's "thinking" pass (think:false doesn't fully suppress
+    # it) plus the verdict lines themselves. Measured: a 9-claim summary
+    # verification came back with zero readable verdicts under the default
+    # llm.max_tokens (4096) - the judge gets its own, larger budget instead of
+    # raising the budget for every other call too.
+    judge_max_tokens: int = 8192
 
 
 class SummarizationSettings(BaseModel):

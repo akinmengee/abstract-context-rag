@@ -171,7 +171,7 @@
           "chat"
         ],
         "summary": "Chat",
-        "description": "Answer a question from the indexed sources, or abstain if they cannot.",
+        "description": "Answer a question from the indexed sources, or abstain if they cannot.\n\nRoutes global questions (\"summarize this paper\") to map-reduce\nsummarisation instead - see RagEngine.ask().",
         "operationId": "chat_api_v1_chat_post",
         "requestBody": {
           "content": {
@@ -213,7 +213,7 @@
           "chat"
         ],
         "summary": "Chat Stream",
-        "description": "Same answer as /chat, streamed as Server-Sent Events.\n\nEvent order is fixed: `citations` once, then `token` repeatedly, then `done`\ncarrying the final answer (including the abstain flag). An abstain sends\n`done` without any tokens.",
+        "description": "Answer as Server-Sent Events - but never routed to summarisation.\n\nUnlike /chat, this always calls stream_answer() directly, which is\nretrieval-only: a global question (\"summarize this paper\") streams a\nnormal (and likely abstained or weak) retrieval answer here, where /chat\nwould instead route it to map-reduce summarisation. So for the same\nglobal question, this endpoint's answer can differ from /chat's.\n\nEvent order is fixed: `citations` once, then `token` repeatedly, then `done`\ncarrying the final answer (including the abstain flag). An abstain sends\n`done` without any tokens.",
         "operationId": "chat_stream_api_v1_chat_stream_post",
         "requestBody": {
           "content": {
@@ -231,6 +231,48 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/summarize": {
+      "post": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Summarize",
+        "description": "The same summarisation /chat routes to automatically, called directly.\n\nBypasses routing - no question-text check, just document_id in, summary\nout. For explicit or scripted use when the caller already knows it wants\na full-document summary; /chat can take just as long when it routes a\nglobal question here on its own.",
+        "operationId": "summarize_api_v1_summarize_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SummarizeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Answer"
+                }
               }
             }
           },
@@ -274,6 +316,20 @@
             },
             "type": "array",
             "title": "Used Chunks"
+          },
+          "verified_claims": {
+            "items": {
+              "$ref": "#/components/schemas/VerifiedClaim"
+            },
+            "type": "array",
+            "title": "Verified Claims"
+          },
+          "section_summaries": {
+            "items": {
+              "$ref": "#/components/schemas/SectionSummary"
+            },
+            "type": "array",
+            "title": "Section Summaries"
           }
         },
         "type": "object",
@@ -485,6 +541,15 @@
         "title": "Citation",
         "description": "One numbered context block the answer is allowed to point at."
       },
+      "ClaimVerdict": {
+        "type": "string",
+        "enum": [
+          "supported",
+          "unsupported",
+          "uncited"
+        ],
+        "title": "ClaimVerdict"
+      },
       "DocumentSummary": {
         "properties": {
           "document_id": {
@@ -638,6 +703,37 @@
         "title": "RetrievedChunk",
         "description": "A chunk plus the score of whichever stage produced it."
       },
+      "SectionSummary": {
+        "properties": {
+          "marker": {
+            "type": "integer",
+            "title": "Marker"
+          },
+          "section": {
+            "type": "string",
+            "title": "Section"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "chunk_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Chunk Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "marker",
+          "section",
+          "text"
+        ],
+        "title": "SectionSummary",
+        "description": "One map step's output: what a [n] marker in a summary points at.\n\n`chunk_ids` is the section's full source text, which is what verification\nchecks a summary claim against - never this summary of it, or a claim\ninvented here would confirm itself."
+      },
       "SourceType": {
         "type": "string",
         "enum": [
@@ -645,6 +741,30 @@
           "wikipedia"
         ],
         "title": "SourceType"
+      },
+      "SummarizeRequest": {
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "title": "Document Id"
+          },
+          "question": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Question"
+          }
+        },
+        "type": "object",
+        "required": [
+          "document_id"
+        ],
+        "title": "SummarizeRequest"
       },
       "ValidationError": {
         "properties": {
@@ -685,6 +805,36 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "VerifiedClaim": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "markers": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Markers"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/ClaimVerdict"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "text",
+          "verdict"
+        ],
+        "title": "VerifiedClaim",
+        "description": "One sentence of an answer, checked against the passage it cited."
       }
     }
   }

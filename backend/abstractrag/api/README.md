@@ -12,7 +12,7 @@ engine, return the result. No RAG logic lives in this folder — that all lives 
 | `health.py` | `GET /health`, `GET /health/dependencies` | Process liveness, and whether Qdrant/the LLM are reachable. |
 | `ingest.py` | `POST /ingest`, `POST /ingest/upload` | Ingest by arXiv ID or Wikipedia title/URL (JSON body), or by uploading a PDF (multipart). Both end in the same `engine.ingest()` call. |
 | `documents.py` | `GET /documents` | Lists what has been ingested. |
-| `chat.py` | `POST /chat`, `POST /chat/stream` | Ask a question; the second endpoint streams the answer as Server-Sent Events. |
+| `chat.py` | `POST /chat`, `POST /chat/stream`, `POST /summarize` | Ask a question; the second endpoint streams the answer as Server-Sent Events. `/chat` automatically routes global questions ("summarize this paper") to the same map-reduce summarisation `/summarize` calls directly. |
 
 There is no `v1/` subfolder on purpose: with a single API version, the extra
 directory added no value. `/api/v1` still comes from the prefix set in

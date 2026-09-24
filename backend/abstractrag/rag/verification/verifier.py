@@ -28,8 +28,9 @@ _MISSING_VERDICT = "the judge returned no readable verdict for this claim"
 
 
 class ClaimVerifier:
-    def __init__(self, llm) -> None:
+    def __init__(self, llm, judge_max_tokens: int = 8192) -> None:
         self.llm = llm
+        self.judge_max_tokens = judge_max_tokens
 
     def verify(
         self,
@@ -73,7 +74,8 @@ class ClaimVerifier:
         """One call for all checkable claims; returns verdicts keyed by claim number."""
         prompt = _build_prompt(numbered_claims, passages)
         response = self.llm.complete(
-            [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}]
+            [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}],
+            max_tokens=self.judge_max_tokens,
         )
         return _parse_verdicts(response)
 
