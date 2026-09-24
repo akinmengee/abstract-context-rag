@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from abstractrag.core.config import RetrievalSettings, Settings, VerificationSettings
 from abstractrag.rag.engine import RagEngine
 from abstractrag.rag.generation.prompts import ABSTAIN_MESSAGE, ABSTAIN_SENTINEL
-from abstractrag.rag.models import ClaimVerdict, RetrievedChunk, VerifiedClaim
+from abstractrag.rag.models import ClaimVerdict, RetrievedChunk, SectionSummary, VerifiedClaim
 from tests.conftest import make_chunk
 
 
@@ -74,12 +74,47 @@ class FakeVerifier:
             for claim in claims
         ]
 
+    def verify_passages(self, claims, passages) -> list[VerifiedClaim]:
+        self.calls += 1
+        self.last_passages = passages
+        return [
+            VerifiedClaim(
+                text=claim.text,
+                markers=claim.markers,
+                verdict=ClaimVerdict.SUPPORTED if claim.markers else ClaimVerdict.UNCITED,
+            )
+            for claim in claims
+        ]
+
+
+class FakeStore:
+    def __init__(self, chunks: list = None) -> None:
+        self.chunks = chunks or []
+
+    def list_chunks(self, document_id: str) -> list:
+        return list(self.chunks)
+
+
+class FakeSummarizer:
+    """Returns a canned (text, summaries) pair; records what it was asked."""
+
+    def __init__(self, text: str, summaries: list[SectionSummary]) -> None:
+        self.text = text
+        self.summaries = summaries
+        self.calls: list[tuple] = []
+
+    def summarize(self, question, chunks):
+        self.calls.append((question, chunks))
+        return self.text, self.summaries
+
 
 def build_engine(
     candidates: list[RetrievedChunk],
     scores: list[float],
     response: str,
     verification_enabled: bool = True,
+    store=None,
+    summarizer=None,
 ) -> RagEngine:
     settings = Settings(
         retrieval=RetrievalSettings(context_size=3, score_threshold=0.3),
@@ -90,11 +125,12 @@ def build_engine(
         resolver=None,
         chunker=None,
         embedder=FakeEmbedder(),
-        store=None,
+        store=store,
         retriever=FakeRetriever(candidates),
         reranker=FakeReranker(scores),
         llm=FakeLLM(response),
         verifier=FakeVerifier(),
+        summarizer=summarizer,
     )
 
 
@@ -305,3 +341,87 @@ class TestPreviewRetrieval:
 
         assert not engine.embedder.unloaded
         assert not engine.reranker.unloaded
+
+
+class TestSummarize:
+    def test_a_summary_cites_sections_and_leaves_used_chunks_empty(self):
+        # No retrieval ran, so there are no scored chunks to show - the section
+        # summaries are what a reader inspects instead.
+        chunks = [make_chunk("real source text", index=0, section_path=["2 Methods"])]
+        summaries = [
+            SectionSummary(
+                marker=1, section="2 Methods", text="summary", chunk_ids=[chunks[0].chunk_id]
+            )
+        ]
+        engine = build_engine(
+            [], [], "unused",
+            store=FakeStore(chunks),
+            summarizer=FakeSummarizer("Final answer [1].", summaries),
+        )
+
+        answer = engine.summarize(None, "doc-1")
+
+        assert answer.used_chunks == []
+        assert [summary.section for summary in answer.section_summaries] == ["2 Methods"]
+        assert [citation.marker for citation in answer.citations] == [1]
+
+    def test_an_unknown_document_abstains_instead_of_summarising_nothing(self):
+        engine = build_engine(
+            [], [], "unused", store=FakeStore([]), summarizer=FakeSummarizer("", [])
+        )
+
+        answer = engine.summarize(None, "missing")
+
+        assert answer.text == ABSTAIN_MESSAGE
+        assert answer.section_summaries == []
+        assert engine.summarizer.calls == []  # never reached: nothing to summarise
+
+    def test_summary_claims_are_verified_against_section_source_text_not_the_summary(self):
+        # The judge must receive the real chunk text, never the intermediate
+        # summary - otherwise a hallucinated section summary validates itself.
+        chunks = [make_chunk("real source text", index=0, section_path=["2 Methods"])]
+        summaries = [
+            SectionSummary(
+                marker=1,
+                section="2 Methods",
+                text="invented summary",
+                chunk_ids=[chunks[0].chunk_id],
+            )
+        ]
+        engine = build_engine(
+            [], [], "unused",
+            store=FakeStore(chunks),
+            summarizer=FakeSummarizer("Final answer [1].", summaries),
+        )
+
+        engine.summarize(None, "doc-1")
+
+        assert engine.verifier.last_passages == {1: "real source text"}
+
+    def test_verification_is_skipped_for_summaries_when_disabled(self):
+        chunks = [make_chunk("real source text", index=0, section_path=["2 Methods"])]
+        summaries = [
+            SectionSummary(marker=1, section="2 Methods", text="s", chunk_ids=[chunks[0].chunk_id])
+        ]
+        engine = build_engine(
+            [], [], "unused",
+            verification_enabled=False,
+            store=FakeStore(chunks),
+            summarizer=FakeSummarizer("Final answer [1].", summaries),
+        )
+
+        answer = engine.summarize(None, "doc-1")
+
+        assert answer.verified_claims == []
+        assert engine.verifier.calls == 0
+
+    def test_no_question_falls_back_to_a_plain_document_summary_request(self):
+        chunks = [make_chunk("text", index=0, section_path=["1 Intro"])]
+        engine = build_engine(
+            [], [], "unused", store=FakeStore(chunks), summarizer=FakeSummarizer("Final.", [])
+        )
+
+        engine.summarize(None, "doc-1")
+
+        question_asked, _ = engine.summarizer.calls[0]
+        assert question_asked  # not None/empty - the summarizer always gets a request

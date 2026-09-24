@@ -35,3 +35,8 @@ class ChatRequest(BaseModel):
     question: str = Field(min_length=1, examples=["What datasets does the paper evaluate on?"])
     # Optional: scope the answer to one document instead of the whole collection.
     document_id: str | None = None
+
+
+class SummarizeRequest(BaseModel):
+    document_id: str
+    question: str | None = None  # None means a plain full-document summary

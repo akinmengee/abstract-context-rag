@@ -16,6 +16,7 @@ from abstractrag.rag.generation.llm_client import LlamaCppClient
 from abstractrag.rag.ingestion.resolver import SourceResolver
 from abstractrag.rag.reranking.cross_encoder import CrossEncoderReranker
 from abstractrag.rag.retrieval.hybrid import HybridRetriever
+from abstractrag.rag.summarization.map_reduce import MapReduceSummarizer
 from abstractrag.rag.verification.verifier import ClaimVerifier
 
 
@@ -35,6 +36,7 @@ def build_engine(settings: Settings) -> RagEngine:
         # The judge is the same local model that answered - no second model to
         # load, and it already has the VRAM.
         verifier=ClaimVerifier(llm),
+        summarizer=MapReduceSummarizer(llm=llm, settings=settings.summarization),
     )
 
 

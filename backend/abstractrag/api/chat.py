@@ -6,7 +6,7 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from abstractrag.api.dependencies import EngineDep
-from abstractrag.api.schemas import ChatRequest
+from abstractrag.api.schemas import ChatRequest, SummarizeRequest
 from abstractrag.rag.engine import RagEngine
 from abstractrag.rag.models import Answer
 
@@ -32,6 +32,12 @@ def chat_stream(request: ChatRequest, engine: EngineDep) -> StreamingResponse:
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.post("/summarize", response_model=Answer)
+def summarize(request: SummarizeRequest, engine: EngineDep) -> Answer:
+    """Global questions and full summaries. Far slower than /chat by design."""
+    return engine.summarize(request.question, request.document_id)
 
 
 def _sse(engine: RagEngine, request: ChatRequest) -> Iterator[str]:

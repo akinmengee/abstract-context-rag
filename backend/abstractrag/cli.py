@@ -55,6 +55,23 @@ def ask(
     _print_verification(answer.verified_claims)
 
 
+@app.command()
+def summarize(
+    document_id: str = typer.Option(..., "--document-id", help="Document to summarise"),
+    question: str = typer.Option(
+        None, "--question", help="Focus the summary, e.g. 'What is the main contribution?'"
+    ),
+) -> None:
+    """Summarise a whole document: one LLM call per section, plus one. Minutes, not seconds."""
+    setup_logging()
+    answer = get_engine().summarize(question, document_id)
+    typer.echo(answer.text)
+    for citation in answer.citations:
+        typer.echo(f"  [{citation.marker}] {citation.section or citation.title}")
+
+    _print_verification(answer.verified_claims)
+
+
 def _print_verification(claims: list[VerifiedClaim]) -> None:
     """Report the count, then only the claims that failed - clean ones are noise."""
     if not claims:

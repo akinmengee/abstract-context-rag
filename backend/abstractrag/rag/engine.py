@@ -20,13 +20,21 @@ from abstractrag.rag.ingestion.base import SourceInput
 from abstractrag.rag.ingestion.resolver import SourceResolver
 from abstractrag.rag.models import (
     Answer,
+    Chunk,
     Citation,
     IngestResult,
     RetrievedChunk,
+    SectionSummary,
     VerifiedClaim,
 )
 from abstractrag.rag.reranking.cross_encoder import CrossEncoderReranker
 from abstractrag.rag.retrieval.hybrid import HybridRetriever
+from abstractrag.rag.summarization import prompts as summary_prompts
+from abstractrag.rag.summarization.map_reduce import (
+    MapReduceSummarizer,
+    citations_for,
+    passages_for,
+)
 from abstractrag.rag.verification.claims import split_claims
 from abstractrag.rag.verification.verifier import ClaimVerifier
 
@@ -67,6 +75,7 @@ class RagEngine:
     reranker: CrossEncoderReranker
     llm: LlamaCppClient
     verifier: ClaimVerifier
+    summarizer: MapReduceSummarizer
 
     def ingest(self, source: SourceInput) -> IngestResult:
         document = self.resolver.resolve(source)
@@ -156,6 +165,41 @@ class RagEngine:
                 verified_claims=self._verify(text, citations, context_chunks),
             ),
         )
+
+    def summarize(self, question: str | None, document_id: str) -> Answer:
+        """Answer a global question by summarising every section, not the top-k.
+
+        "What is this paper about" has its answer spread across the document, so
+        retrieving a handful of chunks cannot reach it. Costs one LLM call per
+        section plus one - see rag.md 8.1.
+        """
+        chunks = self.store.list_chunks(document_id)
+        if not chunks:
+            return _abstain([])
+
+        self._free_gpu_for_llm()
+        text, summaries = self.summarizer.summarize(
+            question or summary_prompts.DEFAULT_REQUEST, chunks
+        )
+        if not text:
+            return _abstain([])
+
+        return Answer(
+            text=text,
+            citations=citations_for(text, summaries, chunks),
+            section_summaries=summaries,
+            verified_claims=self._verify_summary(text, summaries, chunks),
+        )
+
+    def _verify_summary(
+        self, text: str, summaries: list[SectionSummary], chunks: list[Chunk]
+    ) -> list[VerifiedClaim]:
+        """Same judge as an answer, but a marker resolves to the section's source
+        text rather than one chunk - so a claim invented while summarising that
+        section is caught instead of confirmed by its own summary."""
+        if not self.settings.verification.enabled:
+            return []
+        return self.verifier.verify_passages(split_claims(text), passages_for(summaries, chunks))
 
     def preview_retrieval(
         self, question: str, document_id: str | None = None

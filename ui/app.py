@@ -71,6 +71,30 @@ def ask(question: str, document_id: str) -> tuple[str, list[list]]:
     return text, rows
 
 
+def summarize(document_id: str, question: str) -> tuple[str, list[list]]:
+    payload = {"document_id": document_id, "question": question or None}
+    answer = _post("/api/v1/summarize", json=payload)
+
+    text = answer["text"]
+    claims = answer.get("verified_claims") or []
+    if claims:
+        supported = sum(claim["verdict"] == "supported" for claim in claims)
+        text += f"\n\nVerification: {supported}/{len(claims)} claims supported"
+        for claim in claims:
+            if claim["verdict"] == "supported":
+                continue
+            reason = f" — {claim['reason']}" if claim["reason"] else ""
+            text += f"\n  ! {claim['verdict']}: \"{claim['text']}\"{reason}"
+
+    # The section summaries are the equivalent of the retrieval table here: they
+    # show what each map call produced before the reduce step rewrote it.
+    rows = [
+        [summary["marker"], summary["section"], summary["text"]]
+        for summary in answer.get("section_summaries") or []
+    ]
+    return text, rows
+
+
 def list_documents() -> list[list]:
     response = httpx.get(f"{API_URL}/api/v1/documents", timeout=TIMEOUT)
     response.raise_for_status()
@@ -101,6 +125,19 @@ with gr.Blocks(title="abstract-context-rag dev console") as demo:
         )
         gr.Button("Ask", variant="primary").click(
             ask, [question_input, document_input], [answer_output, chunks_output]
+        )
+
+    with gr.Tab("Summarize"):
+        summary_document = gr.Textbox(label="Document ID")
+        summary_question = gr.Textbox(
+            label="Focus (optional)", placeholder="What is the main contribution?"
+        )
+        summary_output = gr.Textbox(label="Summary", lines=10)
+        summary_sections = gr.Dataframe(
+            headers=["marker", "section", "summary"], label="Section summaries", wrap=True
+        )
+        gr.Button("Summarize", variant="primary").click(
+            summarize, [summary_document, summary_question], [summary_output, summary_sections]
         )
 
     with gr.Tab("Documents"):
