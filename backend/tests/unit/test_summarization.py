@@ -1,8 +1,13 @@
 """Map-reduce summarisation: grouping sections, then summarising them."""
 
-from abstractrag.core.config import EmbeddingSettings, QdrantSettings
+from abstractrag.core.config import EmbeddingSettings, QdrantSettings, SummarizationSettings
 from abstractrag.database.qdrant_store import QdrantStore
 from abstractrag.rag.models import Answer, SectionSummary
+from abstractrag.rag.summarization.map_reduce import (
+    MapReduceSummarizer,
+    citations_for,
+    passages_for,
+)
 from abstractrag.rag.summarization.sections import group_sections
 from tests.conftest import make_chunk
 
@@ -144,3 +149,131 @@ class TestSummaryModels:
         summary = SectionSummary(marker=1, section="2 Methods", text="s", chunk_ids=["a", "b"])
 
         assert summary.chunk_ids == ["a", "b"]
+
+
+class _ScriptedLlm:
+    """Returns the next scripted reply per call and records what it was asked."""
+
+    def __init__(self, replies):
+        self.replies = list(replies)
+        self.prompts = []
+
+    def complete(self, messages):
+        self.prompts.append(messages[-1]["content"])
+        return self.replies.pop(0)
+
+
+def _summarizer(replies, max_chars=1000):
+    llm = _ScriptedLlm(replies)
+    settings = SummarizationSettings(max_group_chars=max_chars)
+    return MapReduceSummarizer(llm=llm, settings=settings), llm
+
+
+class TestMapReduce:
+    def test_every_section_is_mapped_then_reduced_once(self):
+        # N sections cost N+1 calls - the honest price of a global answer.
+        chunks = [
+            make_chunk("intro text", index=0, section_path=["1 Intro"]),
+            make_chunk("method text", index=1, section_path=["2 Methods"]),
+        ]
+        summarizer, llm = _summarizer(["intro summary", "method summary", "Final [1][2]."])
+
+        text, summaries = summarizer.summarize("Summarise this document.", chunks)
+
+        assert len(llm.prompts) == 3
+        assert text == "Final [1][2]."
+        assert [summary.section for summary in summaries] == ["1 Intro", "2 Methods"]
+
+    def test_markers_are_numbered_densely_from_one(self):
+        chunks = [
+            make_chunk("a", index=0, section_path=["1 Intro"]),
+            make_chunk("b", index=1, section_path=["2 Methods"]),
+        ]
+        summarizer, _ = _summarizer(["s1", "s2", "Final [1][2]."])
+
+        _, summaries = summarizer.summarize("q", chunks)
+
+        assert [summary.marker for summary in summaries] == [1, 2]
+
+    def test_a_section_with_nothing_relevant_is_dropped_and_does_not_shift_markers(self):
+        # Empty sections must not leave a gap the reduce step has to reason about.
+        chunks = [
+            make_chunk("a", index=0, section_path=["1 Intro"]),
+            make_chunk("b", index=1, section_path=["2 Methods"]),
+        ]
+        summarizer, _ = _summarizer(["NOTHING_RELEVANT", "method summary", "Final [1]."])
+
+        _, summaries = summarizer.summarize("q", chunks)
+
+        assert [(summary.marker, summary.section) for summary in summaries] == [(1, "2 Methods")]
+
+    def test_the_question_reaches_the_map_prompt_not_just_the_reduce_prompt(self):
+        # A question-aware summary is the whole reason "what is the main
+        # contribution?" gets an answer instead of a generic summary.
+        chunks = [make_chunk("a", index=0, section_path=["1 Intro"])]
+        summarizer, llm = _summarizer(["s1", "Final [1]."])
+
+        summarizer.summarize("What is the main contribution?", chunks)
+
+        assert "What is the main contribution?" in llm.prompts[0]
+
+    def test_a_document_with_no_chunks_produces_no_summary(self):
+        summarizer, llm = _summarizer([])
+
+        assert summarizer.summarize("q", []) == ("", [])
+        assert llm.prompts == []
+
+
+class TestSummaryCitations:
+    def test_only_the_markers_the_summary_used_become_citations(self):
+        chunks = [
+            make_chunk("a", index=0, section_path=["1 Intro"]),
+            make_chunk("b", index=1, section_path=["2 Methods"]),
+        ]
+        summaries = [
+            SectionSummary(
+                marker=1, section="1 Intro", text="s1", chunk_ids=[chunks[0].chunk_id]
+            ),
+            SectionSummary(
+                marker=2, section="2 Methods", text="s2", chunk_ids=[chunks[1].chunk_id]
+            ),
+        ]
+
+        citations = citations_for("Only the first section matters [1].", summaries, chunks)
+
+        assert [citation.marker for citation in citations] == [1]
+        assert citations[0].section == "1 Intro"
+
+    def test_a_citation_names_the_section_and_points_at_a_real_chunk(self):
+        chunks = [make_chunk("a", index=0, section_path=["2 Methods"])]
+        summaries = [
+            SectionSummary(marker=1, section="2 Methods", text="s", chunk_ids=[chunks[0].chunk_id])
+        ]
+
+        citation = citations_for("Text [1].", summaries, chunks)[0]
+
+        assert citation.chunk_id == chunks[0].chunk_id
+        assert citation.title == "Test Paper"
+
+
+class TestSummaryPassages:
+    def test_a_marker_resolves_to_the_sections_source_text_not_its_summary(self):
+        # The point of the whole design: checking a claim against the summary
+        # that invented it would confirm every hallucination.
+        chunks = [
+            make_chunk("real source one", index=0, section_path=["2 Methods"]),
+            make_chunk("real source two", index=1, section_path=["2 Methods"]),
+        ]
+        summaries = [
+            SectionSummary(
+                marker=1,
+                section="2 Methods",
+                text="invented summary",
+                chunk_ids=[chunk.chunk_id for chunk in chunks],
+            )
+        ]
+
+        passages = passages_for(summaries, chunks)
+
+        assert passages[1] == "real source one\n\nreal source two"
+        assert "invented summary" not in passages[1]
