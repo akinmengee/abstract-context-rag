@@ -219,8 +219,9 @@ __marimo__/
 
 # --- Project specific ---
 
-# Private planning document, not published
+# Private planning documents, not published
 rag.md
+/plans/
 
 # Large or generated data, kept out of the repo
 data/
