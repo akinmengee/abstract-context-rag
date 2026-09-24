@@ -1,6 +1,7 @@
 """Map-reduce summarisation: grouping sections, then summarising them."""
 
 from abstractrag.core.config import EmbeddingSettings, QdrantSettings, SummarizationSettings
+from abstractrag.core.errors import LLMError
 from abstractrag.database.qdrant_store import QdrantStore
 from abstractrag.rag.models import Answer, SectionSummary
 from abstractrag.rag.summarization.map_reduce import (
@@ -152,7 +153,11 @@ class TestSummaryModels:
 
 
 class _ScriptedLlm:
-    """Returns the next scripted reply per call and records what it was asked."""
+    """Returns the next scripted reply per call and records what it was asked.
+
+    An entry in ``replies`` may also be an exception instance, which is raised
+    instead of returned - used to simulate one LLM call failing mid-run.
+    """
 
     def __init__(self, replies):
         self.replies = list(replies)
@@ -160,7 +165,10 @@ class _ScriptedLlm:
 
     def complete(self, messages):
         self.prompts.append(messages[-1]["content"])
-        return self.replies.pop(0)
+        reply = self.replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
 
 
 def _summarizer(replies, max_chars=1000):
@@ -223,6 +231,45 @@ class TestMapReduce:
         assert summarizer.summarize("q", []) == ("", [])
         assert llm.prompts == []
 
+    def test_inline_reference_markers_in_map_output_are_stripped(self):
+        # "[7]" here is a leftover inline citation from the source text, not a
+        # section marker - it must not survive into the reduce prompt where it
+        # would be indistinguishable from a real one.
+        chunks = [make_chunk("a", index=0, section_path=["1 Intro"])]
+        summarizer, _ = _summarizer(["We follow DPR [7] closely.", "Final [1]."])
+
+        _, summaries = summarizer.summarize("q", chunks)
+
+        assert "[7]" not in summaries[0].text
+
+    def test_a_failed_map_call_is_dropped_like_an_irrelevant_section(self):
+        # A timeout on one section must not discard the calls already completed
+        # for the others - it should be dropped exactly like NOTHING_RELEVANT.
+        chunks = [
+            make_chunk("a", index=0, section_path=["1 Intro"]),
+            make_chunk("b", index=1, section_path=["2 Methods"]),
+        ]
+        summarizer, _ = _summarizer(
+            [LLMError("llama.cpp request timed out"), "method summary", "Final [1]."]
+        )
+
+        _, summaries = summarizer.summarize("q", chunks)
+
+        assert [(summary.marker, summary.section) for summary in summaries] == [
+            (1, "2 Methods")
+        ]
+
+    def test_an_oversized_reduce_prompt_logs_a_warning(self, caplog):
+        # No truncation, no error - just visibility before the context window
+        # silently drops the earliest sections (see llm_client.py's ctx_size gap).
+        chunks = [make_chunk("a", index=0, section_path=["1 Intro"])]
+        summarizer, _ = _summarizer(["x" * 500, "Final [1]."], max_chars=100)
+
+        with caplog.at_level("WARNING"):
+            summarizer.summarize("q", chunks)
+
+        assert any("reduce prompt" in record.message for record in caplog.records)
+
 
 class TestSummaryCitations:
     def test_only_the_markers_the_summary_used_become_citations(self):
@@ -277,3 +324,22 @@ class TestSummaryPassages:
 
         assert passages[1] == "real source one\n\nreal source two"
         assert "invented summary" not in passages[1]
+
+
+class TestMapReduceComposedWithResolution:
+    """The three layers are unit-tested separately elsewhere; this proves they
+    agree once composed - specifically that a dropped section's marker gap
+    doesn't desync `citations_for`/`passages_for` from what `MapReduceSummarizer`
+    actually numbered."""
+
+    def test_a_dropped_section_renumbers_markers_and_their_source_text_together(self):
+        chunks = [
+            make_chunk("intro source", index=0, section_path=["1 Intro"]),
+            make_chunk("method source", index=1, section_path=["2 Methods"]),
+        ]
+        summarizer, _ = _summarizer(["NOTHING_RELEVANT", "method summary", "Final [1]."])
+
+        text, summaries = summarizer.summarize("q", chunks)
+
+        assert passages_for(summaries, chunks)[1] == "method source"  # not "intro source"
+        assert [c.section for c in citations_for(text, summaries, chunks)] == ["2 Methods"]

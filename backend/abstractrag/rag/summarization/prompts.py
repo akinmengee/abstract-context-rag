@@ -20,6 +20,8 @@ MAP_SYSTEM = f"""You summarise one section of a document.
 Rules:
 - Use only the section text. Never add outside knowledge.
 - Quote numbers, dataset names and results exactly as written.
+- Do not write square-bracket numbers like [3] - the source text's own \
+inline references are not section markers and would be read as one.
 - Write at most 4 sentences. No preamble, no heading, no bullet points.
 - If the section says nothing about the request, reply with exactly \
 {NOTHING_RELEVANT} and nothing else."""

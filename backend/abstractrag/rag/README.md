@@ -128,6 +128,37 @@ at using information buried in the middle of a long context ("lost in the
 middle", see `rag.md` §7.5). Citation markers `[1][2][3]…` follow whatever order
 the LLM actually saw, since that's the order it's citing against.
 
+## Flow 3 — summarize
+
+A global question ("what is this paper about") can't be answered from a
+handful of retrieved chunks, so `engine.summarize()` skips retrieval entirely
+and walks every chunk of the document instead:
+
+```
+document_id, question?
+        │
+        ▼
+store.list_chunks()                              every chunk, in document order
+        │
+        ▼
+summarization/map_reduce.py
+  group_sections()            chunks → SectionGroup[], one per section
+  MapReduceSummarizer._map()  one LLM call per group → SectionSummary[]
+  MapReduceSummarizer._reduce()  the summaries → one cited answer
+        │
+        ▼
+Answer(text, citations, section_summaries, verified_claims)
+  citations_for()   [n] → the section it names (citations_for/passages_for)
+  section_summaries  what each marker points at, for the UI and verification
+  verified_claims    checked against each section's real source text, not
+                      the summary that could have invented the claim
+```
+
+Walk it in code: `engine.summarize()` calls `store.list_chunks()` →
+`summarizer.summarize()` → `citations_for()` → `self._verify_summary()`. It
+never touches `retrieval/` or `reranking/` — `used_chunks` stays empty here,
+since no retrieval ran (see `models.py`'s `Answer.section_summaries`).
+
 ## The data model (`models.py`)
 
 The four types every stage passes to the next. Nothing here mentions Qdrant,
@@ -171,14 +202,15 @@ mechanism behind "re-ingesting replaces instead of duplicates."
 | `generation/llm_client.py` | Thin HTTP client for llama.cpp's OpenAI-compatible API | ✅ |
 | `query/` | Query rewriting, HyDE, routing | ⬜ phase 3 |
 | `verification/` | Sentence-level claim decomposition + one batched LLM-judge call per answer; flags unsupported and uncited claims | 🚧 phase 3 |
-| `summarization/` | Map-reduce, then RAPTOR | ⬜ phase 3 / 6 |
+| `summarization/` | Map-reduce built; RAPTOR still to come | 🚧 phase 3 / 6 |
 | `agents/` | Corrective / self-reflective / multi-hop RAG | ⬜ phase 4 |
 | `evaluation/` | Golden dataset, self-implemented metrics (recall@k, MRR, abstain accuracy, LLM-judge faithfulness), ablation runner | 🚧 phase 1-2 |
 
-Each `⬜` package already exists with a docstring in its `__init__.py` explaining
-what will live there and which roadmap phase it belongs to — see `docs/roadmap.md`
-for the phase order. Nothing here is a stub that silently does nothing; if it's
-not built yet, the folder says so.
+`summarization/`, `verification/` and `evaluation/` are built and covered by
+tests. Each remaining `⬜` package already exists with a docstring in its
+`__init__.py` explaining what will live there and which roadmap phase it
+belongs to — see `docs/roadmap.md` for the phase order. Nothing here is a stub
+that silently does nothing; if it's not built yet, the folder says so.
 
 ## Design rules
 

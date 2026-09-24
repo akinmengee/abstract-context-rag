@@ -13,6 +13,7 @@ this cost to indexing time.
 from dataclasses import dataclass
 
 from abstractrag.core.config import SummarizationSettings
+from abstractrag.core.errors import LLMError
 from abstractrag.core.logging import get_logger
 from abstractrag.rag.generation.llm_client import LlamaCppClient
 from abstractrag.rag.generation.prompts import CITATION_MARKER
@@ -41,11 +42,20 @@ class MapReduceSummarizer:
 
         Sections with nothing to say are dropped and markers are numbered over
         what survives, so the reduce stage never sees a gap it has to explain.
+        A section whose LLM call fails is dropped the same way: losing one
+        section beats discarding every already-completed call in the run.
         """
         summaries: list[SectionSummary] = []
         for number, group in enumerate(groups, start=1):
             logger.info("summarising section %d/%d: %s", number, len(groups), group.section)
-            text = self.llm.complete(prompts.build_map_messages(question, group)).strip()
+            try:
+                reply = self.llm.complete(prompts.build_map_messages(question, group))
+            except LLMError as exc:
+                logger.warning("skipping section %r after LLM failure: %s", group.section, exc)
+                continue
+            # Inline references like "[12]" in the source text would otherwise be
+            # indistinguishable from a genuine section marker in the reduce prompt.
+            text = CITATION_MARKER.sub("", reply).strip()
             if not text or prompts.NOTHING_RELEVANT in text:
                 continue
             summaries.append(
@@ -59,6 +69,20 @@ class MapReduceSummarizer:
         return summaries
 
     def _reduce(self, question: str, summaries: list[SectionSummary]) -> str:
+        # No hard cap (finding 2 asked for visibility, not truncation) - just a
+        # log if the assembled summaries are large enough to risk the context
+        # window, since an overflow there truncates silently, not with an error.
+        total_chars = sum(len(summary.section) + len(summary.text) for summary in summaries)
+        threshold = self.settings.max_group_chars * 4
+        if total_chars > threshold:
+            logger.warning(
+                "reduce prompt is large: %d chars across %d summaries (over the "
+                "%d-char guideline derived from max_group_chars) - risks silently "
+                "overflowing the LLM's context window",
+                total_chars,
+                len(summaries),
+                threshold,
+            )
         return self.llm.complete(prompts.build_reduce_messages(question, summaries)).strip()
 
 
