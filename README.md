@@ -11,8 +11,8 @@ instead of guessing.
 - **Grounded answers:** minimize hallucination, and measure it rather than claim it.
 - **Learn by building:** implement each RAG technique from scratch, one at a time,
   and evaluate what it actually adds.
-- **Fully local:** runs on consumer hardware (6 GB VRAM) with llama.cpp,
-  quantized GGUF models, Qdrant, and local embedding/reranking models.
+- **Fully local:** runs on consumer hardware (6 GB VRAM) with a Q4_K_M GGUF of
+  Qwen3-4B-Instruct served by Ollama, Qdrant, and local embedding/reranking models.
 - **Modular engine:** the RAG core is independent of any interface, so the same
   engine can power a chatbot, a summarizer, or a literature review tool.
 
@@ -25,28 +25,37 @@ Implemented today:
 - Hybrid search (bge-m3 dense + sparse) fused with Reciprocal Rank Fusion
 - Cross-encoder reranking, plus a score threshold that abstains before the LLM is asked
 - Grounded generation with numbered citations and lost-in-the-middle context ordering
+- Citation verification: each sentence checked against the passage it cites
+- Map-reduce summarization for whole-document questions, with keyword query routing
+- Corrective and multi-hop retrieval agents (`agent.mode`) for questions that span papers
+- Evaluation harness: golden sets across three papers, recall@k / MRR / evidence
+  recall / abstain accuracy, LLM-judged faithfulness and accuracy, ablation tables
 - FastAPI backend with SSE streaming, an `abstractrag` CLI, and a Gradio dev console
 
-Planned (see [docs/roadmap.md](docs/roadmap.md)):
+Results and measured trade-offs for each phase: [docs/roadmap.md](docs/roadmap.md).
 
-- Query transformation (rewriting, HyDE, routing)
-- Map-reduce and hierarchical (RAPTOR-style) summarization
-- Citation verification with claim decomposition
-- Agentic / corrective RAG for multi-document questions
-- Evaluation harness with a golden dataset and ablation tables
+Planned:
+
+- Query rewriting beyond the agent's retry, HyDE
+- Hierarchical (RAPTOR-style) summarization
+- Fine-tuned embedding and reranker models
 - React and Flutter clients
 
 ## Quick start
 
-Requires Docker, Python 3.11+, [uv](https://docs.astral.sh/uv/), and a
-[llama.cpp](https://github.com/ggml-org/llama.cpp) server running a Qwen3 GGUF model.
+Requires Docker, Python 3.11+, [uv](https://docs.astral.sh/uv/), [Ollama](https://ollama.com),
+and the Q4_K_M GGUF of
+[Qwen3-4B-Instruct-2507](https://huggingface.co/bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF)
+in `models/`.
 
 ```bash
 # 1. Vector database
 docker compose up -d qdrant
 
-# 2. LLM on the host (keeps the GPU out of Docker)
-llama-server -m models/qwen3-4b-q4_k_m.gguf --port 8080 --ctx-size 4096 -ngl 99
+# 2. LLM on the host (keeps the GPU out of Docker). The Modelfile sets the
+#    non-thinking chat template and an 8k context - `ollama pull qwen3:4b` is
+#    the thinking-only model, and Ollama's /v1 API cannot raise num_ctx per request.
+ollama create qwen3:4b-instruct-8k -f backend/ollama/qwen3-4b-instruct-8k.Modelfile
 
 # 3. Backend
 cd backend

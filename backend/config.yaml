@@ -5,22 +5,25 @@
 
 llm:
   # Ollama exposes an OpenAI-compatible API (chosen over a raw llama.cpp server
-  # for ease of setup; still llama.cpp/ggml underneath). Model pulled via
-  # `ollama pull qwen3:4b` - not our own GGUF import, so the chat template is
-  # the one Ollama curates, not auto-detected from the raw file.
+  # for ease of setup; still llama.cpp/ggml underneath).
   # Docker -> host: http://host.docker.internal:11434/v1
   # 127.0.0.1, not localhost: Ollama binds IPv4 only, and Windows can resolve
   # "localhost" to the IPv6 loopback (::1) first, which nothing is listening on.
   base_url: "http://127.0.0.1:11434/v1"
-  model: "qwen3:4b"
-  # Start small; raise only when map-reduce / RAPTOR needs more context (6 GB VRAM budget).
-  ctx_size: 4096
+  # Qwen3-4B-Instruct-2507 from models/, with its own (non-thinking) template
+  # and num_ctx baked in. Create it once with
+  #   ollama create qwen3:4b-instruct-8k -f backend/ollama/qwen3-4b-instruct-8k.Modelfile
+  # Not `ollama pull qwen3:4b`: that tag is the thinking-only 2507 model, which
+  # no request flag switches off (measured ~3000 reasoning tokens, ~57s, for a
+  # one-word reply; the instruct model answers the same prompt in 0.5s).
+  model: "qwen3:4b-instruct-8k"
+  # Must match the Modelfile's num_ctx: the client warns when a prompt fills it,
+  # because Ollama truncates silently. 8192 fits a multi-hop context (up to 8
+  # chunks) and summary verification; measured 4.2 GB VRAM on the 6 GB card.
+  ctx_size: 8192
   temperature: 0.1
-  # Qwen3 "thinks" before answering (separate `reasoning` field we never read).
-  # `think: false` (llm_client.py) shortens it but does not eliminate it, and a
-  # real question with real retrieved context thinks far longer than a trivial
-  # test prompt - budget generously so content never gets starved.
-  max_tokens: 4096
+  # Prompt and output share ctx_size in Ollama. Answers are a few sentences.
+  max_tokens: 1024
   timeout_seconds: 240
 
 embedding:
@@ -44,10 +47,23 @@ verification:
   # LLM call. Costs ~20-60s per answered question; ACR_VERIFICATION__ENABLED=false
   # turns it off while working on something else.
   enabled: true
-  # Own budget, larger than a normal answer's: a big claim set (measured: 9
-  # claims) can exhaust the default llm.max_tokens during Qwen3's thinking
-  # pass before any verdict line gets written.
-  judge_max_tokens: 8192
+  # Own budget, larger than an answer's: one verdict line per claim, and a
+  # summary can have many claims.
+  judge_max_tokens: 2048
+  # Passages + claims per judge call. A summary cites whole sections; sending
+  # all of them at once overflowed the context and Ollama cut the instructions
+  # off (0/22 readable verdicts). Claims are batched to fit instead.
+  max_prompt_chars: 20000
+
+agent:
+  # off | corrective | multi_hop. Measured on 30 golden questions over three
+  # papers (docs/roadmap.md, phase 4): multi_hop raised accuracy 0.83 -> 0.90
+  # and multi-hop questions 0.00 -> 0.75, at ~44s instead of ~18s per question,
+  # with comparisons dropping 1.00 -> 0.50. corrective alone changed nothing.
+  mode: "multi_hop"
+  max_rewrites: 1
+  max_searches: 3
+  max_context_chunks: 8
 
 summarization:
   # One LLM call per group; raising this means fewer, larger calls.

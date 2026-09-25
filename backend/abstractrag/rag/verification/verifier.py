@@ -9,6 +9,7 @@ Anything the judge does not clearly clear is treated as unsupported. A mechanism
 whose job is trust must not pass a verdict it could not read.
 """
 
+from abstractrag.core.config import VerificationSettings
 from abstractrag.core.logging import get_logger
 from abstractrag.rag.models import Citation, ClaimVerdict, RetrievedChunk, VerifiedClaim
 from abstractrag.rag.verification.claims import Claim
@@ -26,11 +27,22 @@ Judge only support. Ignore style, completeness, and whether the claim is useful.
 
 _MISSING_VERDICT = "the judge returned no readable verdict for this claim"
 
+# Mirror VerificationSettings rather than second literals, so a caller that
+# builds a ClaimVerifier directly (tests, scripts) without going through the
+# container still gets the configured defaults, not stale copies of them.
+_DEFAULTS = VerificationSettings()
+
 
 class ClaimVerifier:
-    def __init__(self, llm, judge_max_tokens: int = 8192) -> None:
+    def __init__(
+        self,
+        llm,
+        judge_max_tokens: int = _DEFAULTS.judge_max_tokens,
+        max_prompt_chars: int = _DEFAULTS.max_prompt_chars,
+    ) -> None:
         self.llm = llm
         self.judge_max_tokens = judge_max_tokens
+        self.max_prompt_chars = max_prompt_chars
 
     def verify(
         self,
@@ -62,7 +74,9 @@ class ClaimVerifier:
             if _known_markers(claim, passages)
         ]
 
-        verdicts = self._ask_judge(checkable, passages) if checkable else {}
+        verdicts: dict[int, tuple[ClaimVerdict, str]] = {}
+        for batch in _batches(checkable, passages, self.max_prompt_chars):
+            verdicts.update(self._ask_judge(batch, passages))
         return [
             self._resolve(claim, passages, verdicts.get(position))
             for position, claim in enumerate(claims, start=1)
@@ -71,8 +85,8 @@ class ClaimVerifier:
     def _ask_judge(
         self, numbered_claims: list[tuple[int, Claim]], passages: dict[int, str]
     ) -> dict[int, tuple[ClaimVerdict, str]]:
-        """One call for all checkable claims; returns verdicts keyed by claim number."""
-        prompt = _build_prompt(numbered_claims, passages)
+        """One call for a batch of claims; returns verdicts keyed by claim number."""
+        prompt = _build_prompt(numbered_claims, passages, self.max_prompt_chars)
         response = self.llm.complete(
             [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}],
             max_tokens=self.judge_max_tokens,
@@ -137,19 +151,56 @@ def _known_markers(claim: Claim, passages: dict[int, str]) -> bool:
     return bool(claim.markers) and all(marker in passages for marker in claim.markers)
 
 
-def _build_prompt(numbered_claims: list[tuple[int, Claim]], passages: dict[int, str]) -> str:
+def _batches(
+    numbered_claims: list[tuple[int, Claim]], passages: dict[int, str], budget: int
+) -> list[list[tuple[int, Claim]]]:
+    """Claims grouped so each judge call's passages and claims fit the budget.
+
+    One call per answer is the norm - a retrieved answer cites a few chunks. A
+    summary cites whole sections, and all of them in one prompt overflows the
+    context window, which Ollama truncates without an error.
+    """
+    batches: list[list[tuple[int, Claim]]] = []
+    current: list[tuple[int, Claim]] = []
+    for item in numbered_claims:
+        if current and _prompt_chars([*current, item], passages) > budget:
+            batches.append(current)
+            current = []
+        current.append(item)
+    if current:
+        batches.append(current)
+    return batches
+
+
+def _prompt_chars(numbered_claims: list[tuple[int, Claim]], passages: dict[int, str]) -> int:
+    cited = {marker for _, claim in numbered_claims for marker in claim.markers}
+    return sum(len(passages[marker]) for marker in cited) + sum(
+        len(claim.text) for _, claim in numbered_claims
+    )
+
+
+def _build_prompt(
+    numbered_claims: list[tuple[int, Claim]], passages: dict[int, str], budget: int
+) -> str:
     """Each cited passage listed once, then the claims that lean on them.
 
     Claim numbers are their position in the whole answer, so the judge's reply
     maps straight back even though uncited claims were left out of the prompt.
+    A single claim citing more text than the budget gets its passages cut to
+    fit - a trimmed judge is still better than a truncated prompt that loses
+    the instructions.
     """
     cited = sorted({marker for _, claim in numbered_claims for marker in claim.markers})
-    passage_block = "\n\n".join(f"[{marker}] {passages[marker]}" for marker in cited)
-
     claim_block = "\n".join(
         f"{position}. (cites {' '.join(f'[{m}]' for m in claim.markers)}) {claim.text}"
         for position, claim in numbered_claims
     )
+
+    limit = None
+    if _prompt_chars(numbered_claims, passages) > budget:
+        limit = max(budget - len(claim_block), 0) // len(cited)
+        logger.warning("judge passages trimmed to %d chars each to fit the prompt", limit)
+    passage_block = "\n\n".join(f"[{marker}] {passages[marker][:limit]}" for marker in cited)
     return f"Passages:\n{passage_block}\n\nClaims:\n{claim_block}"
 
 

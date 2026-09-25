@@ -35,7 +35,7 @@ def ingest(arxiv_id: str, wikipedia: str, pdf_path: str) -> str:
     return f"{result['title']}\n{result['chunk_count']} chunks\nid: {result['document_id']}"
 
 
-def ask(question: str, document_id: str) -> tuple[str, list[list]]:
+def ask(question: str, document_id: str):
     payload = {"question": question, "document_id": document_id or None}
     answer = _post("/api/v1/chat", json=payload)
 
@@ -57,17 +57,22 @@ def ask(question: str, document_id: str) -> tuple[str, list[list]]:
             reason = f" — {claim['reason']}" if claim["reason"] else ""
             text += f"\n  ! {claim['verdict']}: \"{claim['text']}\"{reason}"
 
+    # With agent.mode on, the searches explain a multi-hop answer - or a miss.
+    steps = answer.get("agent_steps") or []
+    if steps:
+        text += "\n\nSearches:" + "".join(
+            f"\n  kept {step['kept']}/{step['retrieved']}  {step['query']}" for step in steps
+        )
+
     # A global question ("summarize this paper") can get routed to a full-document
     # summary instead of a retrieval answer - used_chunks is then always empty and
-    # section_summaries holds the real content, so render that instead of leaving
-    # the table blank with no explanation.
+    # section_summaries holds the real content. A section summary has no score or
+    # page, so it gets its own table instead of being squeezed into the retrieval
+    # table's columns under the wrong labels.
     summaries = answer.get("section_summaries") or []
     if summaries:
-        rows = [
-            [summary["marker"], summary["section"], "", summary["text"]]
-            for summary in summaries
-        ]
-        return text, rows
+        rows = [[summary["marker"], summary["section"], summary["text"]] for summary in summaries]
+        return text, gr.update(value=[], visible=False), gr.update(value=rows, visible=True)
 
     # The retrieval table is the point of this panel: it shows why the answer looks
     # the way it does, including when the engine abstained.
@@ -80,7 +85,7 @@ def ask(question: str, document_id: str) -> tuple[str, list[list]]:
         ]
         for chunk in answer["used_chunks"]
     ]
-    return text, rows
+    return text, gr.update(value=rows, visible=True), gr.update(value=[], visible=False)
 
 
 def summarize(document_id: str, question: str) -> tuple[str, list[list]]:
@@ -135,8 +140,18 @@ with gr.Blocks(title="abstract-context-rag dev console") as demo:
         chunks_output = gr.Dataframe(
             headers=["score", "section", "page", "text"], label="Retrieved context", wrap=True
         )
+        # Shown instead of chunks_output when the question routed to summarize()
+        # (rag.md 7.4.1) - a section summary has no score or page to put there.
+        ask_summaries_output = gr.Dataframe(
+            headers=["marker", "section", "summary"],
+            label="Section summaries (question routed to summarize)",
+            wrap=True,
+            visible=False,
+        )
         gr.Button("Ask", variant="primary").click(
-            ask, [question_input, document_input], [answer_output, chunks_output]
+            ask,
+            [question_input, document_input],
+            [answer_output, chunks_output, ask_summaries_output],
         )
 
     with gr.Tab("Summarize"):

@@ -15,6 +15,7 @@ GLOBAL_QUESTIONS = [
     "What is the main contribution of this paper?",
     "What are the key findings?",
     "What are the main takeaways?",
+    "What are the main findings of this paper?",
     "TL;DR?",
     "tldr this paper",
     "In a nutshell, what does this paper say?",
@@ -40,6 +41,10 @@ SPECIFIC_QUESTIONS = [
     "What key results are in Table 2 for NQ?",
     "Explain the overview diagram in Figure 2.",
     "Give an overview of the DPR retriever architecture.",
+    # "main"/"key" phrases are not anchored to the document (see router.py),
+    # so a nearby table/figure reference is what has to catch this instead.
+    "What key finding does Table 3 report about retrieval accuracy?",
+    "What is the main result shown in Table 1?",
 ]
 
 
@@ -59,3 +64,11 @@ def test_matching_is_case_insensitive():
 
 def test_empty_question_is_not_global():
     assert not is_global_question("")
+
+
+def test_a_trigger_word_does_not_leak_into_an_unrelated_next_sentence():
+    # "summary" and "this paper" are each real, just in different sentences.
+    assert not is_global_question(
+        "I already read the summary of related work. "
+        "Does this paper also evaluate on TriviaQA?"
+    )

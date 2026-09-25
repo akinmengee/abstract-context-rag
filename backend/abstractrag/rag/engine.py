@@ -12,6 +12,9 @@ from pydantic import BaseModel
 from abstractrag.core.config import Settings
 from abstractrag.core.logging import get_logger
 from abstractrag.database.qdrant_store import QdrantStore
+from abstractrag.rag.agents.base import ContextSelection
+from abstractrag.rag.agents.corrective import CorrectiveAgent
+from abstractrag.rag.agents.multi_hop import MultiHopAgent
 from abstractrag.rag.chunking.section_aware import SectionAwareChunker, embedding_text
 from abstractrag.rag.embedding.bge_m3 import BgeM3Embedder
 from abstractrag.rag.generation import prompts
@@ -19,6 +22,7 @@ from abstractrag.rag.generation.llm_client import LlamaCppClient
 from abstractrag.rag.ingestion.base import SourceInput
 from abstractrag.rag.ingestion.resolver import SourceResolver
 from abstractrag.rag.models import (
+    AgentStep,
     Answer,
     Chunk,
     Citation,
@@ -53,19 +57,6 @@ class AnswerEvent(BaseModel):
 
 
 @dataclass
-class _ContextSelection:
-    """Retrieval output plus whether it clears the abstain threshold.
-
-    Carries the chunks even when it does not clear the bar, so a failed question
-    stays diagnosable: was the right section never retrieved, or was it retrieved
-    and then rejected by the threshold? The two need different fixes.
-    """
-
-    chunks: list[RetrievedChunk]
-    sufficient: bool
-
-
-@dataclass
 class RagEngine:
     settings: Settings
     resolver: SourceResolver
@@ -77,6 +68,8 @@ class RagEngine:
     llm: LlamaCppClient
     verifier: ClaimVerifier
     summarizer: MapReduceSummarizer
+    # None is the plain single-pass pipeline (agent.mode = off).
+    agent: CorrectiveAgent | MultiHopAgent | None = None
 
     def ingest(self, source: SourceInput) -> IngestResult:
         document = self.resolver.resolve(source)
@@ -120,7 +113,7 @@ class RagEngine:
     def answer(self, question: str, document_id: str | None = None) -> Answer:
         selection = self._select_context(question, document_id)
         if not selection.sufficient:
-            return _abstain(selection.chunks)
+            return _abstain(selection.chunks, selection.steps)
 
         self._free_gpu_for_llm()
         context_chunks = selection.chunks
@@ -129,13 +122,14 @@ class RagEngine:
         context, citations = prompts.build_context(prompts.order_for_context(context_chunks))
         text = self.llm.complete(prompts.build_messages(question, context))
         if prompts.ABSTAIN_SENTINEL in text:
-            return _abstain(context_chunks)
+            return _abstain(context_chunks, selection.steps)
 
         return Answer(
             text=text,
             citations=_used_citations(text, citations),
             used_chunks=context_chunks,
             verified_claims=self._verify(text, citations, context_chunks),
+            agent_steps=selection.steps,
         )
 
     def stream_answer(
@@ -143,7 +137,7 @@ class RagEngine:
     ) -> Iterator[AnswerEvent]:
         selection = self._select_context(question, document_id)
         if not selection.sufficient:
-            yield AnswerEvent(event="done", answer=_abstain(selection.chunks))
+            yield AnswerEvent(event="done", answer=_abstain(selection.chunks, selection.steps))
             return
 
         self._free_gpu_for_llm()
@@ -161,7 +155,9 @@ class RagEngine:
                 if len(collected) < len(prompts.ABSTAIN_SENTINEL):
                     continue
                 if prompts.ABSTAIN_SENTINEL in collected:
-                    yield AnswerEvent(event="done", answer=_abstain(context_chunks))
+                    yield AnswerEvent(
+                        event="done", answer=_abstain(context_chunks, selection.steps)
+                    )
                     return
                 held = False
                 yield AnswerEvent(event="token", token=collected)
@@ -169,7 +165,7 @@ class RagEngine:
             yield AnswerEvent(event="token", token=token)
 
         if prompts.ABSTAIN_SENTINEL in collected:
-            yield AnswerEvent(event="done", answer=_abstain(context_chunks))
+            yield AnswerEvent(event="done", answer=_abstain(context_chunks, selection.steps))
             return
 
         text = collected.strip()
@@ -182,6 +178,7 @@ class RagEngine:
                 # Verification needs the whole answer, so it runs once the stream
                 # has finished and rides along in this final event.
                 verified_claims=self._verify(text, citations, context_chunks),
+                agent_steps=selection.steps,
             ),
         )
 
@@ -223,31 +220,38 @@ class RagEngine:
     def preview_retrieval(
         self, question: str, document_id: str | None = None
     ) -> tuple[list[RetrievedChunk], bool]:
-        """Retrieve + rerank without ever calling the LLM.
+        """Choose the context without generating an answer.
 
-        For ablation runs that only need recall@k/MRR: generation is the slow
-        part (tens of seconds per question), and retrieval metrics do not need
-        an answer, just the ranked chunks. `sufficient` matches what `answer()`
-        would have done - False means it would have abstained.
+        For ablation runs that only need retrieval metrics: generation is the
+        slow part (tens of seconds per question). With agent.mode off this never
+        calls the LLM; an agent still needs it to grade and plan. `sufficient`
+        matches what `answer()` would have done - False means it would have
+        abstained.
         """
         selection = self._select_context(question, document_id)
         return selection.chunks, selection.sufficient
 
-    def _select_context(self, question: str, document_id: str | None) -> _ContextSelection:
-        """Retrieve, rerank, and apply the abstain threshold.
+    def _select_context(self, question: str, document_id: str | None) -> ContextSelection:
+        """Retrieve, rerank and apply the abstain threshold - or let the agent choose.
 
         `sufficient=False` means the LLM is never asked a question its context
         cannot support - the cheapest hallucination guard.
         """
-        candidates = self.retriever.retrieve(question, document_id)
-        if not candidates:
-            return _ContextSelection(chunks=[], sufficient=False)
+        if self.agent is not None:
+            return self.agent.select(question, document_id, self._search, self._free_gpu_for_llm)
 
-        top = self.reranker.rerank(question, candidates, self.settings.retrieval.context_size)
+        top = self._search(question, document_id)
         if not top or top[0].effective_score < self.settings.retrieval.score_threshold:
             logger.info("abstaining: best score below threshold")
-            return _ContextSelection(chunks=top, sufficient=False)
-        return _ContextSelection(chunks=top, sufficient=True)
+            return ContextSelection(chunks=top, sufficient=False)
+        return ContextSelection(chunks=top, sufficient=True)
+
+    def _search(self, query: str, document_id: str | None) -> list[RetrievedChunk]:
+        """Stage 1 + stage 2 retrieval, no threshold: the top chunks for a query."""
+        candidates = self.retriever.retrieve(query, document_id)
+        if not candidates:
+            return []
+        return self.reranker.rerank(query, candidates, self.settings.retrieval.context_size)
 
     def _verify(
         self,
@@ -282,8 +286,15 @@ class RagEngine:
         }
 
 
-def _abstain(used: list[RetrievedChunk] | None = None) -> Answer:
-    return Answer(text=prompts.ABSTAIN_MESSAGE, abstained=True, used_chunks=used or [])
+def _abstain(
+    used: list[RetrievedChunk] | None = None, steps: list[AgentStep] | None = None
+) -> Answer:
+    return Answer(
+        text=prompts.ABSTAIN_MESSAGE,
+        abstained=True,
+        used_chunks=used or [],
+        agent_steps=steps or [],
+    )
 
 
 def _used_citations(text: str, citations: list[Citation]) -> list[Citation]:

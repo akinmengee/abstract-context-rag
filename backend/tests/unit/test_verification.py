@@ -1,5 +1,6 @@
 """Citation verification: splitting an answer into claims, then judging each one."""
 
+from abstractrag.core.config import VerificationSettings
 from abstractrag.rag.models import Answer, Citation, ClaimVerdict, RetrievedChunk, VerifiedClaim
 from abstractrag.rag.verification.claims import Claim, split_claims
 from abstractrag.rag.verification.verifier import ClaimVerifier
@@ -190,21 +191,86 @@ class TestVerifyPassages:
 
 class TestJudgeMaxTokens:
     def test_the_judge_call_uses_the_configured_max_tokens(self):
-        # Not 8192 (ClaimVerifier's own default) on purpose: if __init__ ever
-        # dropped judge_max_tokens, or _ask_judge hardcoded 8192 instead of
-        # reading self.judge_max_tokens, this would still pass with a default
-        # value but must fail with a non-default one.
+        # Not the default on purpose: if __init__ ever dropped judge_max_tokens,
+        # or _ask_judge hardcoded a number instead of reading
+        # self.judge_max_tokens, this must fail with a non-default value.
         llm = FakeLlm("1|YES|")
-        verifier = ClaimVerifier(llm, judge_max_tokens=2048)
+        verifier = ClaimVerifier(llm, judge_max_tokens=3333)
 
         verifier.verify_passages([Claim(text="DPR is the retriever [1].", markers=[1])], {1: "x"})
 
-        assert llm.last_max_tokens == 2048
+        assert llm.last_max_tokens == 3333
 
-    def test_judge_max_tokens_defaults_when_the_caller_does_not_specify_one(self):
+    def test_judge_max_tokens_defaults_to_the_configured_value(self):
         llm = FakeLlm("1|YES|")
         verifier = ClaimVerifier(llm)  # no judge_max_tokens given
 
         verifier.verify_passages([Claim(text="DPR is the retriever [1].", markers=[1])], {1: "x"})
 
-        assert llm.last_max_tokens == 8192
+        assert llm.last_max_tokens == VerificationSettings().judge_max_tokens
+
+
+class EchoJudge:
+    """Answers YES for every claim number it is shown; records each prompt."""
+
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    def complete(self, messages, max_tokens=None) -> str:
+        prompt = messages[-1]["content"]
+        self.prompts.append(prompt)
+        claims = prompt.split("Claims:\n", 1)[1]
+        numbers = [line.split(".", 1)[0] for line in claims.splitlines() if line.strip()]
+        return "\n".join(f"{number}|YES|" for number in numbers)
+
+
+class TestJudgeBatching:
+    def test_claims_whose_passages_overflow_the_budget_go_to_separate_calls(self):
+        # A summary cites whole sections; one prompt with all of them overflowed
+        # the context window and lost the format instructions (0/22 verdicts).
+        llm = EchoJudge()
+        claims = [Claim(text=f"Claim {n} [{n}].", markers=[n]) for n in (1, 2, 3)]
+        passages = {n: "x" * 400 for n in (1, 2, 3)}
+
+        results = ClaimVerifier(llm, max_prompt_chars=900).verify_passages(claims, passages)
+
+        assert len(llm.prompts) == 2
+        assert all(len(prompt) < 1200 for prompt in llm.prompts)
+        assert [r.verdict for r in results] == [ClaimVerdict.SUPPORTED] * 3
+
+    def test_verdicts_from_later_calls_map_back_to_the_right_claims(self):
+        llm = EchoJudge()
+        claims = [
+            Claim(text="Uncited.", markers=[]),
+            Claim(text="A [1].", markers=[1]),
+            Claim(text="B [2].", markers=[2]),
+        ]
+
+        results = ClaimVerifier(llm, max_prompt_chars=500).verify_passages(
+            claims, {1: "y" * 400, 2: "z" * 400}
+        )
+
+        assert [r.verdict for r in results] == [
+            ClaimVerdict.UNCITED,
+            ClaimVerdict.SUPPORTED,
+            ClaimVerdict.SUPPORTED,
+        ]
+
+    def test_a_small_answer_still_takes_one_call(self):
+        llm = EchoJudge()
+        claims = [Claim(text="A [1].", markers=[1]), Claim(text="B [2].", markers=[2])]
+
+        ClaimVerifier(llm).verify_passages(claims, {1: "short", 2: "short"})
+
+        assert len(llm.prompts) == 1
+
+    def test_one_claim_citing_more_than_the_budget_has_its_passages_trimmed(self):
+        llm = EchoJudge()
+        claim = Claim(text="Everything [1][2].", markers=[1, 2])
+
+        results = ClaimVerifier(llm, max_prompt_chars=1000).verify_passages(
+            [claim], {1: "a" * 5000, 2: "b" * 5000}
+        )
+
+        assert len(llm.prompts[0]) < 1200
+        assert results[0].verdict is ClaimVerdict.SUPPORTED

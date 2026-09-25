@@ -134,6 +134,14 @@ class VerifiedClaim(BaseModel):
     reason: str = ""
 
 
+class AgentStep(BaseModel):
+    """One search an agent ran: what it searched for and what survived grading."""
+
+    query: str
+    retrieved: int
+    kept: int
+
+
 class Answer(BaseModel):
     text: str
     citations: list[Citation] = Field(default_factory=list)
@@ -147,6 +155,9 @@ class Answer(BaseModel):
     # section rather than one retrieved chunk (`used_chunks` stays empty there,
     # because no retrieval ran). See rag.md 8.1.
     section_summaries: list[SectionSummary] = Field(default_factory=list)
+    # Filled only when an agent chose the context (agent.mode != off): the
+    # searches it ran, which is what explains a multi-hop answer or a miss.
+    agent_steps: list[AgentStep] = Field(default_factory=list)
 
 
 class IngestResult(BaseModel):

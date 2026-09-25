@@ -36,10 +36,16 @@ REDUCE_SYSTEM = """You answer a request using numbered section summaries of one 
 
 Rules:
 - Use only the summaries. Never add outside knowledge.
-- Cite the section number in square brackets after every sentence, like [2]. One \
-sentence can rest on several sections: [1][3].
+- End every sentence with the numbers of the sections it comes from, in square \
+brackets, before the full stop. One sentence can rest on several sections.
+- Never put section numbers at the start of the answer or collect them in one \
+place: each sentence carries its own.
 - Quote numbers and names exactly as written.
-- Be concise. Do not repeat the request and do not explain your reasoning."""
+- Be concise. Do not repeat the request and do not explain your reasoning.
+
+Example of the citation format:
+RAG combines a retriever with a seq2seq generator [1]. The retriever is based on \
+DPR [2]. Both are fine-tuned end to end on each task [2][4]."""
 
 REDUCE_USER = """Section summaries:
 {summaries}

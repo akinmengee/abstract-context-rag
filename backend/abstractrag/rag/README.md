@@ -201,12 +201,12 @@ mechanism behind "re-ingesting replaces instead of duplicates."
 | `retrieval/rrf.py` | Reciprocal Rank Fusion — merges two rankings into one | ✅ |
 | `reranking/cross_encoder.py` | Candidates → top-N, scored by a cross-encoder | ✅ |
 | `generation/prompts.py` | System prompt, context ordering, citation numbering | ✅ |
-| `generation/llm_client.py` | Thin HTTP client for llama.cpp's OpenAI-compatible API | ✅ |
+| `generation/llm_client.py` | Thin HTTP client for an OpenAI-compatible API (Ollama); warns when a prompt fills the context window | ✅ |
 | `query/` | Keyword-based routing between retrieval and map-reduce built; rewriting, multi-query, HyDE, step-back, decomposition still to come | 🚧 phase 3 |
 | `verification/` | Sentence-level claim decomposition + one batched LLM-judge call per answer; flags unsupported and uncited claims | 🚧 phase 3 |
 | `summarization/` | Map-reduce built; RAPTOR still to come | 🚧 phase 3 / 6 |
-| `agents/` | Corrective / self-reflective / multi-hop RAG | ⬜ phase 4 |
-| `evaluation/` | Golden dataset, self-implemented metrics (recall@k, MRR, abstain accuracy, LLM-judge faithfulness), ablation runner | 🚧 phase 1-2 |
+| `agents/` | Corrective (LLM-graded retrieval, rewrite and retry) and multi-hop (self-ask follow-up searches) context selection, `agent.mode` | ✅ phase 4 |
+| `evaluation/` | Multi-paper golden sets (single / comparison / multi-hop / abstain), self-implemented metrics (recall@k, MRR, evidence recall, abstain accuracy), LLM-judged faithfulness and accuracy, per-kind reports | ✅ phase 1-4 |
 
 `summarization/`, `verification/` and `evaluation/` are built and covered by
 tests. Each remaining `⬜` package already exists with a docstring in its

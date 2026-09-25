@@ -20,8 +20,15 @@ class LlamaCppClient:
     def __init__(self, settings: LLMSettings) -> None:
         self.settings = settings
 
-    def complete(self, messages: list[dict[str, str]], max_tokens: int | None = None) -> str:
+    def complete(
+        self,
+        messages: list[dict[str, str]],
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+    ) -> str:
         payload = self._payload(messages, stream=False, max_tokens=max_tokens)
+        if temperature is not None:
+            payload["temperature"] = temperature
         try:
             response = httpx.post(
                 f"{self.settings.base_url}/chat/completions",
@@ -30,6 +37,7 @@ class LlamaCppClient:
             )
             response.raise_for_status()
             body = response.json()
+            self._warn_if_truncated(body.get("usage") or {})
             text = body["choices"][0]["message"]["content"].strip()
             if not text:
                 # Most likely cause: max_tokens ran out during Qwen3's "thinking"
@@ -73,6 +81,19 @@ class LlamaCppClient:
         except httpx.HTTPError:
             return False
 
+    def _warn_if_truncated(self, usage: dict) -> None:
+        """Ollama cuts a prompt longer than its context window from the front,
+        without an error - the system prompt goes first. A prompt that exactly
+        fills the window is the only visible trace of that."""
+        prompt_tokens = usage.get("prompt_tokens") or 0
+        if prompt_tokens >= self.settings.ctx_size:
+            logger.warning(
+                "prompt filled the whole context window (%d tokens, ctx_size=%d): "
+                "it was probably truncated and the system prompt lost",
+                prompt_tokens,
+                self.settings.ctx_size,
+            )
+
     def _payload(
         self, messages: list[dict[str, str]], stream: bool, max_tokens: int | None = None
     ) -> dict:
@@ -82,11 +103,6 @@ class LlamaCppClient:
             "temperature": self.settings.temperature,
             "max_tokens": max_tokens if max_tokens is not None else self.settings.max_tokens,
             "stream": stream,
-            # Ollama-specific: hybrid models like Qwen3 default to a chain-of-thought
-            # pass before answering, which we never read (see engine.py) and only
-            # costs latency for grounded extraction. Ignored by servers that don't
-            # support it, so this stays safe if the backend is swapped later.
-            "think": False,
         }
 
 

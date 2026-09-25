@@ -1,0 +1,144 @@
+[
+  {
+    "question": "What encoders does this paper use for questions and passages, and what is the embedding dimension?",
+    "expected_answer": "Two independent BERT-base (uncased) networks, one for questions and one for passages, taking the [CLS] representation as output, so d = 768.",
+    "kind": "single",
+    "scope": "2004.04906",
+    "evidence": [{"paper": "2004.04906", "section": "3.1 Overview"}]
+  },
+  {
+    "question": "Which negative passages does this paper's best retriever use during training?",
+    "expected_answer": "Gold passages of the other questions in the same mini-batch (in-batch negatives) plus one BM25 negative passage per question.",
+    "kind": "single",
+    "scope": "2004.04906",
+    "evidence": [{"paper": "2004.04906", "section": "3.2 Training"}]
+  },
+  {
+    "question": "How is the Wikipedia corpus split into passages in this paper, and how many passages result?",
+    "expected_answer": "Each article is split into disjoint 100-word text blocks, giving 21,015,324 passages, each prepended with its article title and a [SEP] token.",
+    "kind": "single",
+    "scope": "2004.04906",
+    "evidence": [{"paper": "2004.04906", "section": "4.1 Wikipedia Data Pre-processing"}]
+  },
+  {
+    "question": "What learning rate is used to fine-tune the BART generator in this paper?",
+    "expected_answer": "Not answerable: this paper does not train a BART generator.",
+    "kind": "abstain",
+    "scope": "2004.04906"
+  },
+  {
+    "question": "How does this paper compute the relevance score between a query and a document?",
+    "expected_answer": "Late interaction: for each query embedding it takes the maximum similarity (MaxSim, cosine or squared L2) against all document embeddings, and sums these maxima over the query terms.",
+    "kind": "single",
+    "scope": "2004.12832",
+    "evidence": [{"paper": "2004.12832", "section": "3.1 Architecture"}]
+  },
+  {
+    "question": "What is query augmentation in this paper?",
+    "expected_answer": "Padding the query with [mask] tokens up to a fixed length N_q, so BERT produces extra query embeddings at those positions - a soft, learned way to expand the query with new terms or re-weigh existing ones.",
+    "kind": "single",
+    "scope": "2004.12832",
+    "evidence": [{"paper": "2004.12832", "section": "3.2 Query & Document Encoders"}]
+  },
+  {
+    "question": "Which datasets is the model evaluated on in this paper?",
+    "expected_answer": "MS MARCO passage ranking and TREC Complex Answer Retrieval (TREC CAR).",
+    "kind": "single",
+    "scope": "2004.12832",
+    "evidence": [{"paper": "2004.12832", "section": "4.1 Methodology"}]
+  },
+  {
+    "question": "What exact match score does this paper report on Natural Questions?",
+    "expected_answer": "Not answerable: this paper evaluates ranking on MS MARCO and TREC CAR, not QA exact match on Natural Questions.",
+    "kind": "abstain",
+    "scope": "2004.12832"
+  },
+  {
+    "question": "How do DPR and ColBERT differ in how they represent and score a query-passage pair?",
+    "expected_answer": "DPR encodes the question and the passage into one vector each (the [CLS] embedding) and scores them with a dot product. ColBERT keeps a bag of contextualized per-token embeddings for each and scores them with late interaction: the sum over query tokens of the maximum similarity to any document token.",
+    "kind": "comparison",
+    "evidence": [
+      {"paper": "2004.04906", "section": "3.1 Overview"},
+      {"paper": "2004.12832", "section": "3.1 Architecture"}
+    ]
+  },
+  {
+    "question": "Which vector similarity search library do DPR and ColBERT each use?",
+    "expected_answer": "Both use FAISS: DPR builds an in-memory FAISS index over its passage vectors, and ColBERT uses a FAISS IVFPQ index for its end-to-end retrieval.",
+    "kind": "comparison",
+    "evidence": [
+      {"paper": "2004.04906", "section": "5.4 Run-time Efficiency"},
+      {"paper": "2004.12832", "section": "3.6 End-to-end Topk Retrieval with ColBERT"}
+    ]
+  },
+  {
+    "question": "Which datasets are DPR and ColBERT evaluated on?",
+    "expected_answer": "DPR: Natural Questions, TriviaQA, WebQuestions, CuratedTREC and SQuAD. ColBERT: MS MARCO and TREC CAR.",
+    "kind": "comparison",
+    "evidence": [
+      {"paper": "2004.04906", "section": "4.2 Question Answering Datasets"},
+      {"paper": "2004.12832", "section": "4.1 Methodology"}
+    ]
+  },
+  {
+    "question": "What learning rates are used to train DPR and ColBERT?",
+    "expected_answer": "DPR: 1e-5 with Adam (batch size 128). ColBERT: 3e-6 with batch size 32.",
+    "kind": "comparison",
+    "evidence": [
+      {"paper": "2004.04906", "section": "5 Experiments: Passage Retrieval"},
+      {"paper": "2004.12832", "section": "4.1 Methodology"}
+    ]
+  },
+  {
+    "question": "What kind of negative passages were used to train the retriever that RAG builds on?",
+    "expected_answer": "RAG's retriever is DPR, which was trained with in-batch negatives (gold passages of other questions in the same batch) plus one BM25 hard negative per question.",
+    "kind": "multi_hop",
+    "evidence": [
+      {"paper": "2005.11401", "section": "2.2 Retriever: DPR"},
+      {"paper": "2004.04906", "section": "3.2 Training"}
+    ]
+  },
+  {
+    "question": "What is the embedding dimension produced by the encoders of RAG's retriever?",
+    "expected_answer": "RAG uses DPR's BERT-base bi-encoder; DPR takes the [CLS] representation, so the dimension is 768. (RAG's own appendix G says '21M 728 dimensional vectors' - an apparent typo in that paper; an answer of 728 that cites it is grounded but does not resolve the question through DPR.)",
+    "kind": "multi_hop",
+    "evidence": [
+      {"paper": "2005.11401", "section": "2.2 Retriever: DPR"},
+      {"paper": "2004.04906", "section": "3.1 Overview"}
+    ]
+  },
+  {
+    "question": "In its original paper, how did RAG's retriever compare to BM25 in top-20 retrieval accuracy on Natural Questions?",
+    "expected_answer": "RAG's retriever is DPR, which reached 78.4% top-20 accuracy on Natural Questions versus 59.1% for BM25.",
+    "kind": "multi_hop",
+    "evidence": [
+      {"paper": "2005.11401", "section": "2.2 Retriever: DPR"},
+      {"paper": "2004.04906", "section": "5.1 Main Results"}
+    ]
+  },
+  {
+    "question": "The paper that introduced RAG's retriever mentions a concurrent work that uses a late-interaction operator instead of a dual encoder. How does that operator score relevance?",
+    "expected_answer": "RAG's retriever is DPR; DPR's related work cites Khattab and Zaharia (2020), i.e. ColBERT, whose late interaction sums, over query token embeddings, the maximum similarity to any document token embedding (MaxSim).",
+    "kind": "multi_hop",
+    "evidence": [
+      {"paper": "2005.11401", "section": "2.2 Retriever: DPR"},
+      {"paper": "2004.04906", "section": "7 Related Work"},
+      {"paper": "2004.12832", "section": "3.1 Architecture"}
+    ]
+  },
+  {
+    "question": "What MRR@10 does RAPTOR achieve on MS MARCO?",
+    "expected_answer": "Not answerable: none of the ingested papers covers RAPTOR.",
+    "kind": "abstain"
+  },
+  {
+    "question": "How many parameters does the Self-RAG critic model have?",
+    "expected_answer": "Not answerable: none of the ingested papers covers Self-RAG.",
+    "kind": "abstain"
+  },
+  {
+    "question": "What exact match score does ColBERT achieve on TriviaQA?",
+    "expected_answer": "Not answerable: ColBERT is not evaluated on TriviaQA (DPR is, but that is a different model).",
+    "kind": "abstain"
+  }
+]

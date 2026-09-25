@@ -41,12 +41,14 @@ class VerificationSettings(BaseModel):
     # unsupported claims is product behaviour, not a debug aid; turn it off with
     # ACR_VERIFICATION__ENABLED=false while iterating on anything else.
     enabled: bool = True
-    # Headroom for Qwen3's "thinking" pass (think:false doesn't fully suppress
-    # it) plus the verdict lines themselves. Measured: a 9-claim summary
-    # verification came back with zero readable verdicts under the default
-    # llm.max_tokens (4096) - the judge gets its own, larger budget instead of
-    # raising the budget for every other call too.
-    judge_max_tokens: int = 8192
+    # One verdict line per claim, and a summary can have many claims - so the
+    # judge gets its own budget instead of raising llm.max_tokens for every call.
+    judge_max_tokens: int = 2048
+    # Passages + claims per judge call. A summary cites whole sections, and one
+    # call carrying all of them (measured: most of a paper, ~16k tokens) was cut
+    # by Ollama and the format instructions lost - 0/22 readable verdicts. At
+    # ~4 chars/token this leaves room in llm.ctx_size (8192) for the reply.
+    max_prompt_chars: int = 20000
 
 
 class SummarizationSettings(BaseModel):
@@ -54,6 +56,18 @@ class SummarizationSettings(BaseModel):
     # calls. Kept well under llm.ctx_size (6000 chars is roughly 1500 tokens) so
     # the prompt and the summary still fit without raising the context window.
     max_group_chars: int = 6000
+
+
+class AgentSettings(BaseModel):
+    # off: one retrieval pass, as in phases 1-3. corrective: an LLM grades the
+    # retrieved chunks and rewrites the query when none answer it. multi_hop:
+    # corrective, plus follow-up searches for what the first pass was missing.
+    mode: str = Field(default="off", pattern="^(off|corrective|multi_hop)$")
+    # Every rewrite or search is one more LLM call (~20-60s on the 4B model).
+    max_rewrites: int = 1
+    max_searches: int = 3
+    # What several searches pile up must still fit llm.ctx_size with the prompt.
+    max_context_chunks: int = 8
 
 
 class QdrantSettings(BaseModel):
@@ -98,6 +112,7 @@ class Settings(BaseSettings):
     reranker: RerankerSettings = RerankerSettings()
     verification: VerificationSettings = VerificationSettings()
     summarization: SummarizationSettings = SummarizationSettings()
+    agent: AgentSettings = AgentSettings()
     qdrant: QdrantSettings = QdrantSettings()
     chunking: ChunkingSettings = ChunkingSettings()
     retrieval: RetrievalSettings = RetrievalSettings()

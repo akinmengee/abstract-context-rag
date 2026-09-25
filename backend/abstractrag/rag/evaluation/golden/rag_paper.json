@@ -2,67 +2,118 @@
   {
     "question": "What datasets does this paper evaluate on for open-domain question answering?",
     "expected_answer": "Natural Questions (NQ), TriviaQA (TQA), WebQuestions (WQ) and CuratedTrec (CT).",
-    "expected_section": "3.1 Open-domain Question Answering",
-    "is_abstain": false
+    "kind": "single",
+    "scope": "2005.11401",
+    "evidence": [
+      {
+        "paper": "2005.11401",
+        "section": "3.1 Open-domain Question Answering"
+      }
+    ]
   },
   {
     "question": "What retriever does this paper use?",
     "expected_answer": "DPR (Dense Passage Retriever), a bi-encoder architecture based on BERT.",
-    "expected_section": "2.2 Retriever: DPR",
-    "is_abstain": false
+    "kind": "single",
+    "scope": "2005.11401",
+    "evidence": [
+      {
+        "paper": "2005.11401",
+        "section": "2.2 Retriever: DPR"
+      }
+    ]
   },
   {
     "question": "Which model is used as the generator component?",
     "expected_answer": "BART, specifically BART-large, a pre-trained seq2seq transformer.",
-    "expected_section": "2.3 Generator: BART",
-    "is_abstain": false
+    "kind": "single",
+    "scope": "2005.11401",
+    "evidence": [
+      {
+        "paper": "2005.11401",
+        "section": "2.3 Generator: BART"
+      }
+    ]
   },
   {
     "question": "How are the retriever and the generator trained?",
     "expected_answer": "Jointly, without direct supervision on which document should be retrieved, minimising the negative marginal log-likelihood of the target with Adam. The document encoder and index are kept fixed; only the query encoder and the generator are fine-tuned.",
-    "expected_section": "2.4 Training",
-    "is_abstain": false
+    "kind": "single",
+    "scope": "2005.11401",
+    "evidence": [
+      {
+        "paper": "2005.11401",
+        "section": "2.4 Training"
+      }
+    ]
   },
   {
     "question": "What is the difference between the RAG-Sequence and RAG-Token models?",
     "expected_answer": "RAG-Sequence uses the same retrieved document to generate the whole sequence, while RAG-Token can use a different document for each generated token.",
-    "expected_section": "2.1 Models",
-    "is_abstain": false
+    "kind": "single",
+    "scope": "2005.11401",
+    "evidence": [
+      {
+        "paper": "2005.11401",
+        "section": "2.1 Models"
+      }
+    ]
   },
   {
     "question": "How does decoding differ between RAG-Sequence and RAG-Token?",
     "expected_answer": "RAG-Token can be decoded with standard beam search over a per-token marginal distribution, while RAG-Sequence requires running beam search per document and then approximating the sequence probability across documents.",
-    "expected_section": "2.5 Decoding",
-    "is_abstain": false
+    "kind": "single",
+    "scope": "2005.11401",
+    "evidence": [
+      {
+        "paper": "2005.11401",
+        "section": "2.5 Decoding"
+      }
+    ]
   },
   {
     "question": "Which dataset is used for the fact verification experiments?",
     "expected_answer": "FEVER, classifying whether a natural language claim is supported or refuted by Wikipedia.",
-    "expected_section": "3.4 Fact Verification",
-    "is_abstain": false
+    "kind": "single",
+    "scope": "2005.11401",
+    "evidence": [
+      {
+        "paper": "2005.11401",
+        "section": "3.4 Fact Verification"
+      }
+    ]
   },
   {
     "question": "What is retrieval collapse and when did the authors observe it?",
     "expected_answer": "A failure mode where the retriever learns to retrieve the same documents regardless of the input, observed in preliminary experiments on some tasks such as story generation.",
-    "expected_section": "H Retrieval Collapse",
-    "is_abstain": false
+    "kind": "single",
+    "scope": "2005.11401",
+    "evidence": [
+      {
+        "paper": "2005.11401",
+        "section": "H Retrieval Collapse"
+      }
+    ]
   },
   {
     "question": "How does this paper's retrieval approach compare to RAPTOR's hierarchical summarization method?",
     "expected_answer": "Not answerable: RAPTOR was published in 2024, four years after this paper, and is never mentioned in it.",
-    "expected_section": null,
-    "is_abstain": true
+    "kind": "abstain",
+    "scope": "2005.11401",
+    "evidence": []
   },
   {
     "question": "What quantization method does the paper use to compress the generator for local inference?",
     "expected_answer": "Not answerable: the paper does not discuss quantization or local deployment of the model.",
-    "expected_section": null,
-    "is_abstain": true
+    "kind": "abstain",
+    "scope": "2005.11401",
+    "evidence": []
   },
   {
     "question": "What is the reported inference latency of RAG in milliseconds per query?",
     "expected_answer": "Not answerable: the paper reports accuracy metrics, not inference latency benchmarks.",
-    "expected_section": null,
-    "is_abstain": true
+    "kind": "abstain",
+    "scope": "2005.11401",
+    "evidence": []
   }
 ]

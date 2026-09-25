@@ -12,9 +12,14 @@ import typer
 
 from abstractrag.core.container import get_engine
 from abstractrag.core.logging import setup_logging
-from abstractrag.rag.evaluation.judge import LlmJudge
+from abstractrag.rag.evaluation.judge import CorrectnessJudge, LlmJudge
 from abstractrag.rag.evaluation.models import EvaluationReport
-from abstractrag.rag.evaluation.runner import DEFAULT_GOLDEN_SET, load_golden_set, run_evaluation
+from abstractrag.rag.evaluation.runner import (
+    MissingPapersError,
+    default_golden_sets,
+    load_golden_set,
+    run_evaluation,
+)
 from abstractrag.rag.ingestion.base import SourceInput
 from abstractrag.rag.models import ClaimVerdict, VerifiedClaim
 from abstractrag.rag.query.router import is_global_question
@@ -63,6 +68,11 @@ def ask(
     for citation in answer.citations:
         location = citation.section or (f"page {citation.page}" if citation.page else "")
         typer.echo(f"  [{citation.marker}] {citation.title} {location} — {citation.origin}")
+
+    if answer.agent_steps:
+        typer.echo("\nsearches:")
+        for step in answer.agent_steps:
+            typer.echo(f"  kept {step.kept}/{step.retrieved}  {step.query}")
 
     _print_verification(answer.verified_claims)
 
@@ -113,30 +123,48 @@ def documents() -> None:
 
 @app.command("eval")
 def evaluate(
-    golden: Path = typer.Option(
-        DEFAULT_GOLDEN_SET, "--golden", exists=True, help="Golden set JSON"
+    golden: list[Path] = typer.Option(
+        None,
+        "--golden",
+        exists=True,
+        help="Golden set JSON; repeat for several. Default: every file in the golden dir",
     ),
     no_judge: bool = typer.Option(
-        False, "--no-judge", help="Skip the faithfulness judge (one LLM call per answer)"
+        False,
+        "--no-judge",
+        help="Skip the faithfulness and correctness judges (two LLM calls per answer)",
     ),
     retrieval_only: bool = typer.Option(
         False,
         "--retrieval-only",
-        help="Skip generation entirely (recall@k/MRR/abstain only, no LLM call at all)",
+        help="Skip generation entirely (retrieval and abstain metrics only, no LLM call)",
     ),
     json_out: Path = typer.Option(None, "--json", help="Write the raw report for comparisons"),
 ) -> None:
-    """Score the golden set: retrieval quality, abstain correctness, faithfulness.
+    """Score golden sets: retrieval quality, evidence recall, abstains, faithfulness, accuracy.
 
     Retrieval modes are compared by running this once per mode, e.g.
     ACR_RETRIEVAL__MODE=dense abstractrag eval --retrieval-only --json dense.json
+    The phase 2 ablation table was measured on rag_paper.json alone.
     """
     setup_logging()
     engine = get_engine()
-    questions = load_golden_set(golden)
-    judge = None if (no_judge or retrieval_only) else LlmJudge(engine.llm)
+    questions = [
+        question for path in golden or default_golden_sets() for question in load_golden_set(path)
+    ]
+    judged = not (no_judge or retrieval_only)
 
-    report = run_evaluation(engine, questions, judge=judge, retrieval_only=retrieval_only)
+    try:
+        report = run_evaluation(
+            engine,
+            questions,
+            judge=LlmJudge(engine.llm) if judged else None,
+            correctness=CorrectnessJudge(engine.llm) if judged else None,
+            retrieval_only=retrieval_only,
+        )
+    except MissingPapersError as error:
+        typer.echo(f"error: {error}", err=True)
+        raise typer.Exit(1) from error
     _print_report(report)
 
     if json_out:
@@ -146,28 +174,47 @@ def evaluate(
 
 def _print_report(report: EvaluationReport) -> None:
     typer.echo(
-        f"\nmode={report.retrieval_mode} rerank={report.reranker_enabled} k={report.k}\n"
+        f"\nmode={report.retrieval_mode} rerank={report.reranker_enabled} "
+        f"agent={report.agent_mode} k={report.k}\n"
     )
     for result in report.results:
         if result.abstain_correct:
             verdict = "abstained" if result.abstained else "answered"
         else:
             verdict = "WRONGLY abstained" if result.abstained else "SHOULD have abstained"
-        rank = f"rank {result.hit_rank}" if result.hit_rank else "section miss"
+        if result.evidence_recall is not None:
+            found = f"evidence {result.evidence_recall:.2f}"
+        elif result.hit_rank:
+            found = f"rank {result.hit_rank}"
+        else:
+            found = "-" if result.kind.value == "abstain" else "section miss"
         score = "score=none" if result.top_score is None else f"score={result.top_score:.2f}"
         faithful = "" if result.faithful is None else f"  faithful={result.faithful}"
-        typer.echo(f"  {verdict:<22} {rank:<14} {score:<12}{faithful}  {result.question[:60]}")
+        correct = "" if result.correct is None else f"  correct={result.correct}"
+        searches = f"  searches={len(result.searches)}" if result.searches else ""
+        typer.echo(
+            f"  {result.kind.value:<10} {verdict:<22} {found:<14} {score:<12}"
+            f"{faithful}{correct}{searches}  {result.question[:60]}"
+        )
 
     typer.echo(
         f"\nrecall@{report.k}: {report.recall_at_k:.2f}"
         f"   MRR: {report.mrr:.2f}"
+        f"   evidence recall: {report.evidence_recall:.2f}"
         f"   abstain accuracy: {report.abstain_accuracy:.2f}"
-        + (
-            ""
-            if report.faithfulness is None
-            else f"   faithfulness: {report.faithfulness:.2f}"
-        )
+        f"   chunks/answer: {report.mean_context_chunks:.1f}"
+        + ("" if report.faithfulness is None else f"   faithfulness: {report.faithfulness:.2f}")
+        + ("" if report.accuracy is None else f"   accuracy: {report.accuracy:.2f}")
     )
+
+    typer.echo(f"\n  {'kind':<10} {'n':>3}  {'evidence':>8}  {'abstain':>7}  {'accuracy':>8}")
+    for kind, summary in report.by_kind.items():
+        evidence = "-" if summary.evidence_recall is None else f"{summary.evidence_recall:.2f}"
+        accuracy = "-" if summary.accuracy is None else f"{summary.accuracy:.2f}"
+        typer.echo(
+            f"  {kind:<10} {summary.count:>3}  {evidence:>8}  "
+            f"{summary.abstain_accuracy:>7.2f}  {accuracy:>8}"
+        )
 
 
 @app.command()

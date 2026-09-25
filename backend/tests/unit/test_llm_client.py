@@ -14,13 +14,16 @@ from abstractrag.rag.generation.llm_client import LlamaCppClient
 class _FakeResponse:
     status_code = 200
 
+    def __init__(self, usage: dict | None = None) -> None:
+        self.usage = usage or {}
+
     def raise_for_status(self) -> None:
         pass
 
     def json(self) -> dict:
         return {
             "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
-            "usage": {},
+            "usage": self.usage,
         }
 
 
@@ -51,3 +54,25 @@ def test_omitting_the_override_uses_the_configured_default(monkeypatch):
     client.complete([{"role": "user", "content": "hi"}])
 
     assert captured["max_tokens"] == 1024
+
+
+def _client_returning_usage(monkeypatch, usage: dict) -> LlamaCppClient:
+    monkeypatch.setattr(httpx, "post", lambda url, json, timeout: _FakeResponse(usage))
+    return LlamaCppClient(LLMSettings(ctx_size=4096))
+
+
+def test_a_prompt_that_fills_the_context_window_is_flagged(monkeypatch, caplog):
+    # Measured: Ollama cut a 6965-token prompt to exactly 4096 with no error.
+    client = _client_returning_usage(monkeypatch, {"prompt_tokens": 4096})
+
+    client.complete([{"role": "user", "content": "long"}])
+
+    assert "truncated" in caplog.text
+
+
+def test_a_prompt_that_fits_is_not_flagged(monkeypatch, caplog):
+    client = _client_returning_usage(monkeypatch, {"prompt_tokens": 1200})
+
+    client.complete([{"role": "user", "content": "short"}])
+
+    assert "truncated" not in caplog.text
