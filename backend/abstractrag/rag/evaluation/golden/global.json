@@ -1,0 +1,74 @@
+[
+  {
+    "question": "What is the main contribution of this paper?",
+    "expected_answer": "A general-purpose fine-tuning recipe for retrieval-augmented generation (RAG): a pre-trained seq2seq generator (BART) as parametric memory combined with a dense vector index of Wikipedia accessed by a pre-trained neural retriever (DPR) as non-parametric memory, trained end to end.",
+    "kind": "global",
+    "scope": "2005.11401"
+  },
+  {
+    "question": "Summarize this paper.",
+    "expected_answer": "RAG combines a BART generator with a DPR retriever over a Wikipedia index, in two variants (RAG-Sequence uses one retrieved document for the whole output, RAG-Token can use a different one per token). It sets the state of the art on open-domain QA (Natural Questions, WebQuestions, CuratedTrec), generates more factual, specific and diverse text than a parametric-only BART baseline, comes within 4.3% of the state of the art on FEVER, and its knowledge can be updated by swapping the index.",
+    "kind": "global",
+    "scope": "2005.11401"
+  },
+  {
+    "question": "What is the main contribution of this paper?",
+    "expected_answer": "Showing that dense retrieval alone can beat BM25 for open-domain QA: a simple dual encoder (two BERT encoders, dot-product similarity) trained only on question-passage pairs with in-batch negatives, without extra pretraining, outperforms BM25 by 9-19% absolute in top-20 passage retrieval accuracy and gives a new state of the art in end-to-end QA.",
+    "kind": "global",
+    "scope": "2004.04906"
+  },
+  {
+    "question": "Summarize this paper.",
+    "expected_answer": "DPR trains separate BERT encoders for questions and passages so that relevant pairs have a high dot product, using in-batch negatives plus one BM25 hard negative. It beats BM25 by a large margin in top-k retrieval accuracy on most open-domain QA datasets (not SQuAD), shows that higher retrieval precision leads to better end-to-end QA accuracy, and reaches a new state of the art on several QA benchmarks.",
+    "kind": "global",
+    "scope": "2004.04906"
+  },
+  {
+    "question": "What is the main contribution of this paper?",
+    "expected_answer": "ColBERT, a late-interaction ranking model: query and document are encoded independently with BERT into per-token embeddings and scored with a cheap MaxSim interaction, so document representations can be precomputed. It matches BERT-based rankers in effectiveness while being about two orders of magnitude faster and using four orders of magnitude fewer FLOPs per query, and it supports end-to-end retrieval with a vector index.",
+    "kind": "global",
+    "scope": "2004.12832"
+  },
+  {
+    "question": "Summarize this paper.",
+    "expected_answer": "ColBERT encodes queries and documents separately with BERT and scores them by summing each query token's maximum similarity to the document tokens (late interaction). Document embeddings are computed offline, so re-ranking is over 170x faster than BERT rankers with competitive MRR@10 on MS MARCO and TREC CAR, and the model can also retrieve end to end from a FAISS index with higher recall than term-based retrieval.",
+    "kind": "global",
+    "scope": "2004.12832"
+  },
+  {
+    "question": "What is the main contribution of this paper?",
+    "expected_answer": "Showing that language models do not robustly use long input contexts: on multi-document QA and key-value retrieval, performance is highest when relevant information is at the beginning or end of the context and degrades significantly in the middle (a U-shaped curve), even for extended-context models, which motivates new evaluation protocols for long-context models.",
+    "kind": "global",
+    "scope": "2307.03172"
+  },
+  {
+    "question": "Summarize this paper.",
+    "expected_answer": "Through controlled experiments on multi-document QA and synthetic key-value retrieval, the paper finds a U-shaped performance curve: models use information at the start (primacy) and end (recency) of their context best and the middle worst, extended-context models are not better at using their context, and in open-domain QA reader performance saturates long before retriever recall. It also examines model architecture, query-aware contextualization and instruction fine-tuning as factors.",
+    "kind": "global",
+    "scope": "2307.03172"
+  },
+  {
+    "question": "What is the main contribution of this paper?",
+    "expected_answer": "Self-RAG, a framework that trains a single LM to retrieve passages on demand and to generate and critique its own output with special reflection tokens, improving quality and factuality; it outperforms ChatGPT and retrieval-augmented Llama2-chat on open-domain QA, reasoning and fact verification and improves factuality and citation accuracy in long-form generation.",
+    "kind": "global",
+    "scope": "2310.11511"
+  },
+  {
+    "question": "Summarize this paper.",
+    "expected_answer": "Self-RAG trains an LM to emit reflection tokens that decide when to retrieve (Retrieve) and judge relevance (ISREL), support (ISSUP) and usefulness (ISUSE). A critic model distilled from GPT-4 inserts these tokens into training data offline, and the generator (Llama 2 7B/13B) learns to produce them; at inference they enable adaptive retrieval and critique-guided segment-level beam search. It outperforms strong LLMs and standard RAG baselines on six tasks, with higher citation accuracy.",
+    "kind": "global",
+    "scope": "2310.11511"
+  },
+  {
+    "question": "What is the main contribution of this paper?",
+    "expected_answer": "RAPTOR: recursively embedding, clustering and summarizing text chunks into a tree with different levels of abstraction, and retrieving from that tree at inference time, which integrates information across long documents and significantly improves over traditional retrieval augmentation - e.g. a 20% absolute accuracy gain on QuALITY with GPT-4.",
+    "kind": "global",
+    "scope": "2401.18059"
+  },
+  {
+    "question": "Summarize this paper.",
+    "expected_answer": "RAPTOR builds a tree bottom-up by clustering chunk embeddings (Gaussian mixture models with UMAP, number of clusters by BIC), summarizing each cluster with an LLM, and repeating on the summaries. Queries search all tree levels at once (collapsed tree), which beat layer-by-layer tree traversal. Combined with SBERT, BM25 or DPR it outperforms each retriever alone on NarrativeQA, QASPER and QuALITY, and with GPT-4 it sets new state-of-the-art results.",
+    "kind": "global",
+    "scope": "2401.18059"
+  }
+]

@@ -6,6 +6,7 @@ CLI is the only place that wires the real ones in.
 """
 
 import json
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -23,7 +24,9 @@ from abstractrag.rag.evaluation.models import (
     QuestionKind,
     QuestionResult,
     RetrievedSection,
+    Split,
 )
+from abstractrag.rag.models import ClaimVerdict, VerifiedClaim
 
 logger = get_logger(__name__)
 
@@ -59,6 +62,13 @@ def load_golden_set(path: Path) -> list[GoldenQuestion]:
         return [GoldenQuestion.model_validate(entry) for entry in json.load(handle)]
 
 
+def select_split(questions: list[GoldenQuestion], split: str) -> list[GoldenQuestion]:
+    """The questions of one split, or all of them for "all"."""
+    if split == "all":
+        return list(questions)
+    return [question for question in questions if question.split == Split(split)]
+
+
 def resolve_papers(questions: list[GoldenQuestion], documents: list[dict]) -> dict[str, str]:
     """arXiv ID -> document ID, for every paper a scope or an evidence names."""
     papers = {question.scope for question in questions if question.scope} | {
@@ -83,6 +93,7 @@ def run_evaluation(
     judge: Judge | None = None,
     correctness: CorrectnessJudge | None = None,
     retrieval_only: bool = False,
+    entry: str = "answer",
 ) -> EvaluationReport:
     """Score a golden set.
 
@@ -90,6 +101,9 @@ def run_evaluation(
     instead of engine.answer()) and forces both judges off with it - generation
     is the slow part (tens of seconds per question) and ablation runs that
     compare retrieval configs do not need an answer, only the ranked chunks.
+
+    `entry="ask"` goes through the router, so global questions reach
+    summarize() the way a user's would; "answer" is retrieval for everything.
     """
     if retrieval_only:
         judge = correctness = None
@@ -101,13 +115,18 @@ def run_evaluation(
         logger.info("[%d/%d] %s", index, len(questions), question.question)
         document_id = papers[question.scope] if question.scope else None
 
+        started = time.perf_counter()
+        supported = None
         if retrieval_only:
             chunks, sufficient = engine.preview_retrieval(question.question, document_id)
             abstained, answer_text, searches = not sufficient, "", []
         else:
-            answer = engine.answer(question.question, document_id)
+            call = engine.ask if entry == "ask" else engine.answer
+            answer = call(question.question, document_id)
             chunks, abstained, answer_text = answer.used_chunks, answer.abstained, answer.text
             searches = [step.query for step in answer.agent_steps]
+            supported = _supported_share(answer.verified_claims)
+        seconds = time.perf_counter() - started
 
         retrieved = [
             RetrievedSection(
@@ -116,8 +135,10 @@ def run_evaluation(
             for chunk in chunks
         ]
 
+        # A summary has no retrieved chunks to be faithful to; verification
+        # (supported_claims) is what checks it against its sources.
         faithful = None
-        if judge and not abstained:
+        if judge and not abstained and chunks:
             faithful = judge(answer_text, "\n\n".join(chunk.chunk.text for chunk in chunks))
 
         results.append(
@@ -136,12 +157,14 @@ def run_evaluation(
                 top_score=chunks[0].effective_score if chunks else None,
                 faithful=faithful,
                 correct=_judge_correctness(question, abstained, answer_text, correctness),
+                seconds=seconds,
+                supported_claims=supported,
                 searches=searches,
                 answer=answer_text,
             )
         )
 
-    return _report(engine.settings, questions, results, judge, correctness)
+    return _report(engine.settings, questions, results, judge, correctness, entry)
 
 
 def _judge_correctness(
@@ -165,6 +188,7 @@ def _report(
     results: list[QuestionResult],
     judge: Judge | None,
     correctness: CorrectnessJudge | None,
+    entry: str,
 ) -> EvaluationReport:
     k = settings.retrieval.context_size
     pairs = list(zip(questions, results, strict=True))
@@ -174,6 +198,9 @@ def _report(
         retrieval_mode=settings.retrieval.mode,
         reranker_enabled=settings.reranker.enabled,
         agent_mode=settings.agent.mode,
+        entry=entry,
+        summary_method=settings.summarization.method,
+        tree_retrieval=settings.retrieval.include_tree_nodes,
         k=k,
         total_questions=len(questions),
         recall_at_k=_mean([recall_at_k(r.retrieved, q.evidence[0], k) for q, r in singles]),
@@ -183,9 +210,9 @@ def _report(
             [r.evidence_recall for r in results if r.evidence_recall is not None]
         ),
         mean_context_chunks=_mean([len(r.retrieved) for r in results if not r.abstained]),
-        faithfulness=_mean([r.faithful for r in results if r.faithful is not None])
-        if judge
-        else None,
+        mean_seconds=_mean([r.seconds for r in results]),
+        supported_claims=_mean_or_none([r.supported_claims for r in results]),
+        faithfulness=_mean_or_none([r.faithful for r in results]) if judge else None,
         accuracy=_mean([r.correct for r in results if r.correct is not None])
         if correctness
         else None,
@@ -209,6 +236,8 @@ def _by_kind(results: list[QuestionResult], judged: bool) -> dict[str, KindSumma
             if kind in _MULTI_EVIDENCE
             else None,
             accuracy=_mean([r.correct for r in group]) if judged else None,
+            mean_seconds=_mean([r.seconds for r in group]),
+            supported_claims=_mean_or_none([r.supported_claims for r in group]),
         )
     return summaries
 
@@ -216,3 +245,14 @@ def _by_kind(results: list[QuestionResult], judged: bool) -> dict[str, KindSumma
 def _mean(values: list[bool] | list[float] | list[int]) -> float:
     """Mean of a possibly empty list - an empty slice scores 0.0, not a crash."""
     return sum(values) / len(values) if values else 0.0
+
+
+def _supported_share(claims: list[VerifiedClaim]) -> float | None:
+    if not claims:
+        return None
+    return sum(claim.verdict is ClaimVerdict.SUPPORTED for claim in claims) / len(claims)
+
+
+def _mean_or_none(values: list[float | None]) -> float | None:
+    present = [value for value in values if value is not None]
+    return _mean(present) if present else None

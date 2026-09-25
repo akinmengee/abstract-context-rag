@@ -11,8 +11,8 @@ Status: ✅ done · 🚧 in progress · ⬜ not started
 | 2 | Retrieval depth | Hybrid search, RRF, cross-encoder reranking, chunking variants | Ablation table: dense vs sparse vs hybrid vs hybrid+rerank (recall@k, MRR, abstain accuracy) | ✅ |
 | 3 | Query and verification | Query routing, map-reduce summaries, citation verification | Faithfulness before/after verification; abstain accuracy | 🚧 |
 | 4 | Agentic RAG | Corrective / self-reflective retrieval, multi-paper questions | Multi-hop question accuracy | ✅ |
-| 5 | Fine-tuning | Embedding → reranker → generator | Retrieval metrics against the base models | ⬜ |
-| 6 | RAPTOR / GraphRAG | Hierarchical and graph indexes | Global-question accuracy vs map-reduce | ⬜ |
+| 5 | RAPTOR / GraphRAG | Hierarchical index (RAPTOR); GraphRAG deferred | Global-question accuracy vs map-reduce | ✅ |
+| 6 | Fine-tuning | Embedding → reranker → generator, trained on Kaggle (2x ~20GB GPU) | Retrieval/answer metrics against the base models | ⬜ |
 | 7 | Multimodal | Tables and figures, ColPali | Accuracy on table and number questions | ⬜ |
 | 8 | Wikipedia | Single-article ingestion through the Wikipedia adapter | Same golden-set metrics on a second domain | ⬜ |
 | 9 | Interfaces | React web app, Flutter mobile app, Docker packaging | Runs from one command; usable from a phone | ⬜ |
@@ -326,7 +326,7 @@ Limits, honestly:
   the query rewrite had used one of the three searches.
 - The multi-paper questions and reference answers were drafted in the same
   session that built the agents, by the same assistant, from the real parsed
-  sections - a human review of `multi_paper.json` is still owed (rag.md 7.7).
+  sections; reviewed and approved by the user on 2026-09-25 (rag.md 7.7).
 
 Found and fixed along the way (all measured, details in `rag.md` 3):
 - `ollama pull qwen3:4b` is **Qwen3-4B-Thinking-2507**: its template opens every
@@ -354,3 +354,140 @@ Next:
   rather than only graded chunks, and measure.
 - Three-hop chains: count the query rewrite outside the search budget, or
   raise `max_searches`, and measure the cost.
+
+## Phase 5 status (RAPTOR - swapped with fine-tuning)
+
+Order changed on 2026-09-25: fine-tuning's training step runs on Kaggle (2x
+~20GB GPU) and needs the user at every step, while RAPTOR can be built and
+measured end to end locally. GraphRAG is deferred, not dropped: it would be a
+new subsystem with no reuse, solving the multi-hop problem phase 4 already
+reaches at 0.75, and its advantage only shows at a corpus size far beyond six
+papers. Design: `rag.md` 7.9.1.
+
+Done (step 0, shared groundwork for phases 5 and 6):
+- The six core papers of `rag.md` 11 are ingested: Lost in the Middle
+  (2307.03172, 40 chunks), Self-RAG (2310.11511, 55) and RAPTOR (2401.18059,
+  43) join RAG, DPR and ColBERT - 238 chunks.
+- Golden set grown to 48 questions (24 single, 6 comparison, 6 multi-hop, 12
+  abstain) with a new `core_papers.json`. Two old abstain targets became
+  answerable once their papers were ingested: the Self-RAG critic question was
+  replaced by a GraphRAG one; "What MRR@10 does RAPTOR achieve on MS MARCO?"
+  stays an abstain - now a harder one, since the paper is in the corpus but
+  never evaluates on MS MARCO.
+- Golden questions carry `split: train | eval` (default `eval`), and
+  `abstractrag eval --split` scores only `eval` by default - so fine-tuning
+  data can never be drawn from the questions it will be scored on.
+- Retrieval-only check on the six-paper corpus (`agent.mode off`): recall@5
+  0.96 over 24 single questions; evidence recall 0.33 on comparisons and 0.53
+  on multi-hop; abstain accuracy 0.67 before generation (the reranker still
+  cannot see a wrong-system question - generation catches those, phase 4).
+
+Parse QC notes from the new papers: RAPTOR's "3 METHODS" came through as one
+section with no subsections (six chunks), and a few captions or prompt text
+became fake sections ("Example:", "Summary found in the parent of that
+node:", Self-RAG's "Instructions" / "Demonstrations" / "Perceived utility 3").
+
+Done (RAPTOR, 2026-09-25):
+- **Measurement first:** a `global` golden kind (`global.json`: a
+  main-contribution and a summary question for each of the six papers,
+  scoped, no evidence) and `abstractrag eval --entry ask`, which goes through
+  the router so global questions reach `summarize()` like a user's would. Each
+  question is timed (engine call incl. verification, judges excluded) and
+  scored by the share of claims verification cleared.
+- **Tree nodes are chunks:** stored in the same Qdrant collection with a
+  top-level `level` payload (0 = leaf) and `source_ids` (the leaves a node
+  covers). Retrieval hides them unless `retrieval.include_tree_nodes`; points
+  ingested before this change have no `level` and count as leaves, so nothing
+  had to be re-ingested. `list_chunks()` returns leaves unless a level is asked.
+- `rag/raptor/`: `clustering.py` (Ward-linkage agglomerative clustering on unit
+  vectors, deterministic, clusters over twice the target size re-clustered -
+  simpler than the paper's GMM + UMAP + BIC, and good enough on this corpus) and
+  `tree.py` (summarise each cluster with the map-reduce map prompt, embed the
+  summaries, repeat up to `max_levels`). `abstractrag build-tree`; ingest
+  builds the tree when `raptor.build_on_ingest`.
+- **Variant (a)** - `summarization.method: raptor`: `summarize()` reduces the
+  document's level-1 nodes in one call, no map calls at question time. A
+  citation still resolves to the leaves under a node for verification.
+- **Variant (b)** - `retrieval.include_tree_nodes`: `answer()` may retrieve
+  tree nodes next to chunks (collapsed tree); a claim citing a node is verified
+  against its leaves' text, never the node's summary.
+
+Tree build: 69 nodes over the six papers (9-15 per paper), 61-93 s per paper,
+about 7.5 minutes in total, paid once. With the tree built and hidden, the
+retrieval-only numbers were identical to step 0 - no regression.
+
+**Global questions** (12, verification on):
+
+| path | accuracy | supported claims | time / question |
+|---|---|---|---|
+| map-reduce via router (phase 3) | 0.92 | 0.76 | ~103 s |
+| **RAPTOR (a): summarize() from level-1 nodes** | **1.00** | **0.78** | **~32 s** |
+| RAPTOR (b): tree nodes in answer(), agent off | 0.50 | 0.46 | ~16 s |
+| RAPTOR (b): tree nodes in answer(), agent multi_hop | 0.75 | 0.54 | ~49 s |
+| plain top-k (tree hidden), agent multi_hop | 0.58 | 0.42 | ~45 s |
+
+**Specific questions** (48 from `rag_paper`, `multi_paper`, `core_papers`;
+agent multi_hop, verification off):
+
+| tree nodes | accuracy | single | comparison | multi-hop | abstain | recall@5 | MRR | evidence recall |
+|---|---|---|---|---|---|---|---|---|
+| hidden (six-paper baseline) | 0.85 | 1.00 | 0.67 | 0.17 | 1.00 | 0.96 | 0.85 | 0.47 |
+| visible | 0.88 | 1.00 | 0.83 | 0.17 | 1.00 | 0.92 | 0.74 | 0.32 |
+
+Defaults chosen from these numbers: `summarization.method: raptor` with
+`raptor.build_on_ingest: true` (otherwise new documents silently fall back to
+map-reduce); `retrieval.include_tree_nodes: false`; the router stays.
+
+Findings:
+- **RAPTOR (a) is the win: at least as accurate as map-reduce, ~3x faster.**
+  12/12 against 11/12 and 0.78 against 0.76 supported claims are within one
+  question of each other; the latency is not (~32 s against ~103 s). The one
+  thing given up is question-aware section summaries - the tree is summarised
+  once, without the question - and on these 12 questions it cost nothing.
+- **Tree nodes in ordinary retrieval (b) do not replace the router.** With the
+  multi-hop agent they lift global questions over plain top-k (0.75 against
+  0.58) but stay far below (a), and on specific questions they displace leaf
+  chunks: recall@5 0.96 -> 0.92, MRR 0.85 -> 0.74, evidence recall 0.47 ->
+  0.32 (partly by construction - a node's section label never matches a single
+  expected section). Accuracy moved +1 comparison question, within noise.
+- **Verifying tree summaries needs heavy trimming.** A level-1 node covers
+  about five leaves (~9k characters); a claim citing several nodes exceeds
+  `verification.max_prompt_chars`, so passages are cut (26 trims across the
+  12 (a) answers) and occasionally a claim gets no readable verdict and counts
+  as unsupported. 0.78 is therefore a lower bound.
+- **Clusters cross section lines, as RAPTOR intends** - e.g. RAPTOR's title
+  chunk clustered with its summarisation-prompt appendix - so a citation label
+  like "ABSTRACT; 1 INTRODUCTION; 2 RELATED WORK (+2 more)" is less readable
+  than one section name.
+- **Multi-hop fell to 1/6 on the six-paper corpus - a phase 4 gap, not a
+  RAPTOR effect** (measured with the tree hidden). In five of six questions the
+  pool holds the second hop (DPR's training, DPR's results, Lost in the
+  Middle's U-curve, ColBERT's MRR@10) but not the bridge that links the
+  question to it ("RAG's retriever is DPR", "RAPTOR cites Liu et al.",
+  "Self-RAG uses Contriever-MS MARCO"): the first search never ranks the
+  bridge chunk in its top five, and the planner jumps straight to the second
+  hop from its own knowledge. Without the bridge the generator abstains - the
+  grounded behaviour, and deterministic (3/3 reruns). Phase 4's runs had the
+  same missing bridge (evidence recall 0.54) but the model filled the gap from
+  its own knowledge; the phase 4 multi-hop score was partly ungrounded.
+- Integration tests: with Qdrant's storage on a synced folder (OneDrive), a
+  deleted collection's directory sometimes lingers and blocks re-creating it.
+  The store tests now use a fresh collection name each and tolerate a failed
+  cleanup; the root cause is the storage location.
+
+Limits, honestly:
+- 12 global questions: one question is ~0.08. The latency gap is the robust
+  result; the accuracy difference is not.
+- The correctness judge compares against a reference written for this set;
+  summaries are long and a lenient judge can pass a partly wrong one.
+- Global questions all use the same two phrasings; other phrasings depend on
+  the keyword router (phase 3).
+
+Next:
+- Multi-hop bridges: make the planner search for the unstated link first
+  ("which retriever does RAG use") instead of jumping to the target, and
+  re-measure the 48 specific questions.
+- Verification of tree-based summaries: judge a claim against the leaves most
+  relevant to it rather than all leaves under every cited node.
+- Try the paper's GMM + UMAP clustering only if a larger corpus shows the
+  simple clustering falling short.

@@ -146,7 +146,7 @@ store.list_chunks()                              every chunk, in document order
 summarization/map_reduce.py
   group_sections()            chunks → SectionGroup[], one per section
   MapReduceSummarizer._map()  one LLM call per group → SectionSummary[]
-  MapReduceSummarizer._reduce()  the summaries → one cited answer
+  MapReduceSummarizer.reduce()   the summaries → one cited answer
         │
         ▼
 Answer(text, citations, section_summaries, verified_claims)
@@ -204,7 +204,8 @@ mechanism behind "re-ingesting replaces instead of duplicates."
 | `generation/llm_client.py` | Thin HTTP client for an OpenAI-compatible API (Ollama); warns when a prompt fills the context window | ✅ |
 | `query/` | Keyword-based routing between retrieval and map-reduce built; rewriting, multi-query, HyDE, step-back, decomposition still to come | 🚧 phase 3 |
 | `verification/` | Sentence-level claim decomposition + one batched LLM-judge call per answer; flags unsupported and uncited claims | 🚧 phase 3 |
-| `summarization/` | Map-reduce built; RAPTOR still to come | 🚧 phase 3 / 6 |
+| `summarization/` | Map-reduce, and `summarization.method: raptor` - reduce the document's RAPTOR tree instead of mapping every section | ✅ phase 3 / 5 |
+| `raptor/` | RAPTOR summary tree per document: clustering (no LLM) and bottom-up tree building; nodes stored as chunks with a `level`, hidden from retrieval by default | ✅ phase 5 |
 | `agents/` | Corrective (LLM-graded retrieval, rewrite and retry) and multi-hop (self-ask follow-up searches) context selection, `agent.mode` | ✅ phase 4 |
 | `evaluation/` | Multi-paper golden sets (single / comparison / multi-hop / abstain), self-implemented metrics (recall@k, MRR, evidence recall, abstain accuracy), LLM-judged faithfulness and accuracy, per-kind reports | ✅ phase 1-4 |
 

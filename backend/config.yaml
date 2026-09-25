@@ -68,6 +68,20 @@ agent:
 summarization:
   # One LLM call per group; raising this means fewer, larger calls.
   max_group_chars: 6000
+  # map_reduce: summarise every section per question. raptor: reduce the
+  # document's precomputed tree nodes - no map calls, but not question-aware.
+  # Measured on 12 global questions (docs/roadmap.md, phase 5): raptor 12/12
+  # correct at ~32s vs map_reduce 11/12 at ~103s, supported claims 0.78 vs 0.76.
+  method: "raptor"
+
+raptor:
+  # A summary tree per document (rag.md 7.9.1): cluster chunks, summarise each
+  # cluster, repeat on the summaries. One LLM call per cluster, paid once.
+  cluster_size: 5
+  max_levels: 3
+  # On because summarization.method is raptor: a document without a tree falls
+  # back to map-reduce. Costs ~60-95s per paper at ingest (measured, 6 papers).
+  build_on_ingest: true
 
 qdrant:
   url: "http://localhost:6333"
@@ -91,6 +105,11 @@ retrieval:
   # 0.3 was rejecting a correct retrieval. Revisit once the golden set grows past
   # one paper; this gap is narrow on 11 samples.
   score_threshold: 0.12
+  # RAPTOR variant (b): let answer() retrieve tree summary nodes next to chunks.
+  # Off: retrieval sees the documents' own chunks only. Measured: global
+  # questions already reach the tree through summarize(), and visible nodes cost
+  # specific questions recall@5 0.96 -> 0.92 and MRR 0.85 -> 0.74.
+  include_tree_nodes: false
 
 ingestion:
   # Downloaded PDFs and parser output land here (gitignored).

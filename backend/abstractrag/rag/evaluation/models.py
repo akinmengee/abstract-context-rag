@@ -10,6 +10,14 @@ class QuestionKind(StrEnum):
     COMPARISON = "comparison"  # two or more papers, each answering its own half
     MULTI_HOP = "multi_hop"  # one hop's answer is needed to find the next one
     ABSTAIN = "abstain"  # the corpus (or the scoped paper) does not contain it
+    GLOBAL = "global"  # needs the whole document: a summary or its main contribution
+
+
+class Split(StrEnum):
+    # eval questions are never trained on: a fine-tuned model scored on
+    # questions it saw in training would only be measuring memorisation.
+    TRAIN = "train"
+    EVAL = "eval"
 
 
 class Evidence(BaseModel):
@@ -37,6 +45,7 @@ class GoldenQuestion(BaseModel):
     kind: QuestionKind
     scope: str | None = None
     evidence: list[Evidence] = Field(default_factory=list)
+    split: Split = Split.EVAL
 
     @property
     def is_abstain(self) -> bool:
@@ -52,9 +61,12 @@ class GoldenQuestion(BaseModel):
             QuestionKind.COMPARISON: count >= 2,
             QuestionKind.MULTI_HOP: count >= 2,
             QuestionKind.ABSTAIN: count == 0,
+            QuestionKind.GLOBAL: count == 0,
         }[self.kind]
         if not valid:
             raise ValueError(f"{self.kind.value} question has {count} evidence: {self.question}")
+        if self.kind is QuestionKind.GLOBAL and not self.scope:
+            raise ValueError(f"global question needs a scope: {self.question}")
         return self
 
 
@@ -86,6 +98,10 @@ class QuestionResult(BaseModel):
     faithful: bool | None = None
     # None only when the correctness judge was disabled.
     correct: bool | None = None
+    # Wall-clock time of the engine call, verification included, judges excluded.
+    seconds: float = 0.0
+    # Share of verified claims the verifier cleared; None when nothing was verified.
+    supported_claims: float | None = None
     # Queries an agent searched for; empty with agent.mode off.
     searches: list[str] = Field(default_factory=list)
     answer: str = ""
@@ -96,6 +112,8 @@ class KindSummary(BaseModel):
     abstain_accuracy: float
     evidence_recall: float | None = None
     accuracy: float | None = None
+    mean_seconds: float = 0.0
+    supported_claims: float | None = None
 
 
 class EvaluationReport(BaseModel):
@@ -109,6 +127,12 @@ class EvaluationReport(BaseModel):
     retrieval_mode: str
     reranker_enabled: bool
     agent_mode: str
+    # "answer" (retrieval only) or "ask" (router: global questions go to summarize()).
+    entry: str = "answer"
+    # How summarize() writes a global answer: map_reduce or raptor (tree nodes).
+    summary_method: str = "map_reduce"
+    # Whether answer() could retrieve RAPTOR tree nodes next to chunks.
+    tree_retrieval: bool = False
     k: int
 
     total_questions: int
@@ -121,6 +145,8 @@ class EvaluationReport(BaseModel):
     # Chunks per answer: an engine that retrieves more can raise evidence recall
     # just by retrieving more, and this keeps that visible.
     mean_context_chunks: float
+    mean_seconds: float = 0.0
+    supported_claims: float | None = None
     faithfulness: float | None = None
     accuracy: float | None = None
     by_kind: dict[str, KindSummary] = Field(default_factory=dict)

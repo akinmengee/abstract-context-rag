@@ -17,8 +17,9 @@ from abstractrag.rag.evaluation.runner import (
     default_golden_sets,
     load_golden_set,
     run_evaluation,
+    select_split,
 )
-from abstractrag.rag.models import Answer, RetrievedChunk
+from abstractrag.rag.models import Answer, RetrievedChunk, VerifiedClaim
 from tests.conftest import make_chunk
 
 RAG = "2005.11401"
@@ -101,10 +102,47 @@ class TestGoldenQuestion:
         with pytest.raises(ValidationError):
             GoldenQuestion(question="q", expected_answer="a", kind="abstain", evidence=[RETRIEVER])
 
+    def test_a_global_question_needs_a_scope(self):
+        # "Summarise this paper" means nothing without saying which paper.
+        with pytest.raises(ValidationError):
+            GoldenQuestion(question="Summarise this paper.", expected_answer="a", kind="global")
+
+    def test_a_global_question_has_no_evidence(self):
+        with pytest.raises(ValidationError):
+            GoldenQuestion(
+                question="q", expected_answer="a", kind="global", scope=RAG, evidence=[RETRIEVER]
+            )
+
+    def test_a_question_is_eval_unless_marked_otherwise(self):
+        # Existing golden files carry no split: they must stay out of training.
+        question = GoldenQuestion(question="q", expected_answer="a", kind="abstain")
+
+        assert question.split == "eval"
+
+    def test_an_unknown_split_is_rejected(self):
+        with pytest.raises(ValidationError):
+            GoldenQuestion(question="q", expected_answer="a", kind="abstain", split="test")
+
     @pytest.mark.parametrize("path", default_golden_sets(), ids=lambda path: path.name)
     def test_every_golden_file_loads(self, path):
         # A malformed golden file must fail here, not halfway through a slow run.
         assert load_golden_set(path)
+
+
+class TestSelectSplit:
+    QUESTIONS = [
+        GoldenQuestion(question="e", expected_answer="a", kind="abstain"),
+        GoldenQuestion(question="t", expected_answer="a", kind="abstain", split="train"),
+    ]
+
+    def test_eval_leaves_training_questions_out(self):
+        assert [q.question for q in select_split(self.QUESTIONS, "eval")] == ["e"]
+
+    def test_train_selects_only_training_questions(self):
+        assert [q.question for q in select_split(self.QUESTIONS, "train")] == ["t"]
+
+    def test_all_keeps_everything(self):
+        assert len(select_split(self.QUESTIONS, "all")) == 2
 
 
 def chunks_from(sections: list[tuple[str, str]], score: float) -> list[RetrievedChunk]:
@@ -150,11 +188,17 @@ class FakeEngine:
         self.settings = Settings(retrieval=RetrievalSettings(context_size=3))
         self.store = FakeStore(origins if origins is not None else [RAG_ORIGIN, DPR_ORIGIN])
         self.answer_calls = 0
+        self.ask_calls = 0
         self.preview_calls = 0
         self.document_ids: list[str | None] = []
 
     def answer(self, question: str, document_id: str | None = None) -> Answer:
         self.answer_calls += 1
+        self.document_ids.append(document_id)
+        return self.answers.pop(0)
+
+    def ask(self, question: str, document_id: str | None = None) -> Answer:
+        self.ask_calls += 1
         self.document_ids.append(document_id)
         return self.answers.pop(0)
 
@@ -365,6 +409,72 @@ class TestCorrectness:
 
         assert report.accuracy is None
         assert report.results[0].correct is None
+
+
+GLOBAL = GoldenQuestion(
+    question="Summarise this paper.", expected_answer="RAG", kind="global", scope=RAG
+)
+
+
+def summary(text: str, verdicts: list[str]) -> Answer:
+    """A map-reduce style answer: no retrieved chunks, verified claims only."""
+    return Answer(
+        text=text,
+        verified_claims=[
+            VerifiedClaim(text=f"claim {i}", markers=[1], verdict=verdict)
+            for i, verdict in enumerate(verdicts)
+        ],
+    )
+
+
+class TestRoutedAndTimed:
+    def test_entry_ask_goes_through_the_router(self):
+        # Global questions only reach summarize() through ask().
+        engine = FakeEngine([summary("RAG [1].", ["supported"])])
+
+        run_evaluation(engine, [GLOBAL], entry="ask")
+
+        assert engine.ask_calls == 1
+        assert engine.answer_calls == 0
+
+    def test_each_question_is_timed(self, monkeypatch):
+        clock = iter([10.0, 12.5])
+        monkeypatch.setattr(
+            "abstractrag.rag.evaluation.runner.time.perf_counter", lambda: next(clock)
+        )
+        engine = FakeEngine([summary("RAG [1].", ["supported"])])
+
+        report = run_evaluation(engine, [GLOBAL], entry="ask")
+
+        assert report.results[0].seconds == 2.5
+        assert report.by_kind["global"].mean_seconds == 2.5
+
+    def test_supported_claims_is_the_share_verification_cleared(self):
+        engine = FakeEngine(
+            [summary("RAG [1].", ["supported", "supported", "unsupported", "uncited"])]
+        )
+
+        report = run_evaluation(engine, [GLOBAL], entry="ask")
+
+        assert report.results[0].supported_claims == 0.5
+        assert report.supported_claims == 0.5
+
+    def test_an_answer_with_no_retrieved_context_is_not_sent_to_the_faithfulness_judge(self):
+        # A summary has no used_chunks; judging it against empty context always says NO.
+        engine = FakeEngine([summary("RAG [1].", ["supported"])])
+        judged = []
+
+        report = run_evaluation(
+            engine,
+            [GLOBAL],
+            judge=lambda answer, context: judged.append(answer) or True,
+            entry="ask",
+        )
+
+        assert judged == []
+        assert report.results[0].faithful is None
+        # Nothing was judged: 0.00 would read as "every answer unfaithful".
+        assert report.faithfulness is None
 
 
 class FakeJudgeLlm:

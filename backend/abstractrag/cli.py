@@ -6,6 +6,8 @@ running an evaluation without starting a server.
 """
 
 import json
+import time
+from enum import StrEnum
 from pathlib import Path
 
 import typer
@@ -19,10 +21,23 @@ from abstractrag.rag.evaluation.runner import (
     default_golden_sets,
     load_golden_set,
     run_evaluation,
+    select_split,
 )
 from abstractrag.rag.ingestion.base import SourceInput
 from abstractrag.rag.models import ClaimVerdict, VerifiedClaim
 from abstractrag.rag.query.router import is_global_question
+
+
+class SplitChoice(StrEnum):
+    EVAL = "eval"
+    TRAIN = "train"
+    ALL = "all"
+
+
+class EntryChoice(StrEnum):
+    ANSWER = "answer"
+    ASK = "ask"
+
 
 app = typer.Typer(help="Local RAG engine for research papers and Wikipedia.", no_args_is_help=True)
 
@@ -43,6 +58,23 @@ def ingest(
     )
     result = get_engine().ingest(source)
     typer.echo(f"{result.title}\n  {result.chunk_count} chunks  |  id {result.document_id}")
+    if result.tree_nodes:
+        typer.echo(f"  {result.tree_nodes} tree nodes")
+
+
+@app.command("build-tree")
+def build_tree(
+    document_id: str = typer.Option(None, "--document-id", help="One document; default: all"),
+) -> None:
+    """Build RAPTOR summary trees: one LLM call per cluster, once per document."""
+    setup_logging()
+    engine = get_engine()
+    documents = engine.store.list_documents()
+    ids = [document_id] if document_id else [document["document_id"] for document in documents]
+    for doc_id in ids:
+        started = time.perf_counter()
+        count = engine.build_tree(doc_id)
+        typer.echo(f"{doc_id}: {count} tree nodes in {time.perf_counter() - started:.0f}s")
 
 
 @app.command()
@@ -59,8 +91,8 @@ def ask(
     setup_logging()
     if document_id and is_global_question(question):
         typer.echo(
-            "Global question detected - summarising the whole document, "
-            "this can take several minutes.",
+            "Global question detected - summarising the whole document "
+            "(about half a minute from a RAPTOR tree, minutes with map-reduce).",
             err=True,
         )
     answer = get_engine().ask(question, document_id)
@@ -84,7 +116,12 @@ def summarize(
         None, "--question", help="Focus the summary, e.g. 'What is the main contribution?'"
     ),
 ) -> None:
-    """Summarise a whole document: one LLM call per section, plus one. Minutes, not seconds."""
+    """Summarise a whole document from its RAPTOR tree, or section by section (map-reduce).
+
+    summarization.method raptor needs a built tree (build-tree, or
+    raptor.build_on_ingest) and takes about half a minute; map-reduce takes
+    one LLM call per section, i.e. minutes.
+    """
     setup_logging()
     answer = get_engine().summarize(question, document_id)
     typer.echo(answer.text)
@@ -140,6 +177,17 @@ def evaluate(
         help="Skip generation entirely (retrieval and abstain metrics only, no LLM call)",
     ),
     json_out: Path = typer.Option(None, "--json", help="Write the raw report for comparisons"),
+    split: SplitChoice = typer.Option(
+        SplitChoice.EVAL,
+        "--split",
+        help="Which golden questions to score. Reported numbers come from eval only",
+    ),
+    entry: EntryChoice = typer.Option(
+        EntryChoice.ANSWER,
+        "--entry",
+        help="answer: retrieval for every question. "
+        "ask: the router, so global questions are summarised",
+    ),
 ) -> None:
     """Score golden sets: retrieval quality, evidence recall, abstains, faithfulness, accuracy.
 
@@ -149,9 +197,13 @@ def evaluate(
     """
     setup_logging()
     engine = get_engine()
-    questions = [
-        question for path in golden or default_golden_sets() for question in load_golden_set(path)
-    ]
+    questions = select_split(
+        [q for path in golden or default_golden_sets() for q in load_golden_set(path)],
+        split.value,
+    )
+    if not questions:
+        typer.echo(f"error: no golden questions in split {split.value!r}", err=True)
+        raise typer.Exit(1)
     judged = not (no_judge or retrieval_only)
 
     try:
@@ -161,6 +213,7 @@ def evaluate(
             judge=LlmJudge(engine.llm) if judged else None,
             correctness=CorrectnessJudge(engine.llm) if judged else None,
             retrieval_only=retrieval_only,
+            entry=entry.value,
         )
     except MissingPapersError as error:
         typer.echo(f"error: {error}", err=True)
@@ -175,7 +228,8 @@ def evaluate(
 def _print_report(report: EvaluationReport) -> None:
     typer.echo(
         f"\nmode={report.retrieval_mode} rerank={report.reranker_enabled} "
-        f"agent={report.agent_mode} k={report.k}\n"
+        f"agent={report.agent_mode} entry={report.entry} summary={report.summary_method} "
+        f"tree={report.tree_retrieval} k={report.k}\n"
     )
     for result in report.results:
         if result.abstain_correct:
@@ -187,14 +241,14 @@ def _print_report(report: EvaluationReport) -> None:
         elif result.hit_rank:
             found = f"rank {result.hit_rank}"
         else:
-            found = "-" if result.kind.value == "abstain" else "section miss"
+            found = "-" if result.kind.value in ("abstain", "global") else "section miss"
         score = "score=none" if result.top_score is None else f"score={result.top_score:.2f}"
         faithful = "" if result.faithful is None else f"  faithful={result.faithful}"
         correct = "" if result.correct is None else f"  correct={result.correct}"
         searches = f"  searches={len(result.searches)}" if result.searches else ""
         typer.echo(
             f"  {result.kind.value:<10} {verdict:<22} {found:<14} {score:<12}"
-            f"{faithful}{correct}{searches}  {result.question[:60]}"
+            f"{result.seconds:>5.0f}s{faithful}{correct}{searches}  {result.question[:60]}"
         )
 
     typer.echo(
@@ -205,15 +259,26 @@ def _print_report(report: EvaluationReport) -> None:
         f"   chunks/answer: {report.mean_context_chunks:.1f}"
         + ("" if report.faithfulness is None else f"   faithfulness: {report.faithfulness:.2f}")
         + ("" if report.accuracy is None else f"   accuracy: {report.accuracy:.2f}")
+        + f"   secs/question: {report.mean_seconds:.1f}"
+        + (
+            ""
+            if report.supported_claims is None
+            else f"   supported claims: {report.supported_claims:.2f}"
+        )
     )
 
-    typer.echo(f"\n  {'kind':<10} {'n':>3}  {'evidence':>8}  {'abstain':>7}  {'accuracy':>8}")
+    typer.echo(
+        f"\n  {'kind':<10} {'n':>3}  {'evidence':>8}  {'abstain':>7}  {'accuracy':>8}"
+        f"  {'secs':>6}  {'supported':>9}"
+    )
     for kind, summary in report.by_kind.items():
         evidence = "-" if summary.evidence_recall is None else f"{summary.evidence_recall:.2f}"
         accuracy = "-" if summary.accuracy is None else f"{summary.accuracy:.2f}"
+        supported = "-" if summary.supported_claims is None else f"{summary.supported_claims:.2f}"
         typer.echo(
             f"  {kind:<10} {summary.count:>3}  {evidence:>8}  "
-            f"{summary.abstain_accuracy:>7.2f}  {accuracy:>8}"
+            f"{summary.abstain_accuracy:>7.2f}  {accuracy:>8}  "
+            f"{summary.mean_seconds:>6.1f}  {supported:>9}"
         )
 
 

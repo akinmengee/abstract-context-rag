@@ -26,10 +26,13 @@ Implemented today:
 - Cross-encoder reranking, plus a score threshold that abstains before the LLM is asked
 - Grounded generation with numbered citations and lost-in-the-middle context ordering
 - Citation verification: each sentence checked against the passage it cites
-- Map-reduce summarization for whole-document questions, with keyword query routing
+- Whole-document questions answered from a RAPTOR summary tree built at ingest (or
+  map-reduce), with keyword query routing
 - Corrective and multi-hop retrieval agents (`agent.mode`) for questions that span papers
-- Evaluation harness: golden sets across three papers, recall@k / MRR / evidence
-  recall / abstain accuracy, LLM-judged faithfulness and accuracy, ablation tables
+- Evaluation harness: golden sets across six papers (specific, comparison,
+  multi-hop, abstain and whole-document questions), recall@k / MRR / evidence
+  recall / abstain accuracy, LLM-judged faithfulness and accuracy, time per
+  question, ablation tables
 - FastAPI backend with SSE streaming, an `abstractrag` CLI, and a Gradio dev console
 
 Results and measured trade-offs for each phase: [docs/roadmap.md](docs/roadmap.md).
@@ -37,7 +40,6 @@ Results and measured trade-offs for each phase: [docs/roadmap.md](docs/roadmap.m
 Planned:
 
 - Query rewriting beyond the agent's retry, HyDE
-- Hierarchical (RAPTOR-style) summarization
 - Fine-tuned embedding and reranker models
 - React and Flutter clients
 

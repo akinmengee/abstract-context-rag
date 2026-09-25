@@ -1,0 +1,130 @@
+[
+  {
+    "question": "How does model performance change as the relevant document moves through the input context, and what are the two biases behind that pattern?",
+    "expected_answer": "It follows a U-shaped curve: performance is highest when the relevant information is at the very beginning (primacy bias) or the very end (recency bias) of the context, and degrades significantly when it is in the middle.",
+    "kind": "single",
+    "scope": "2307.03172",
+    "evidence": [{"paper": "2307.03172", "section": "2.3 Results and Discussion"}]
+  },
+  {
+    "question": "How are the distractor documents in this paper's multi-document question answering task collected?",
+    "expected_answer": "With a retrieval system (Contriever fine-tuned on MS-MARCO) that retrieves the k-1 Wikipedia chunks most relevant to the query that do not contain any of the NaturalQuestions-annotated answers.",
+    "kind": "single",
+    "scope": "2307.03172",
+    "evidence": [{"paper": "2307.03172", "section": "2.1 Experimental Setup"}]
+  },
+  {
+    "question": "In this paper's open-domain QA case study, how much does using 50 retrieved documents instead of 20 improve reader performance?",
+    "expected_answer": "Only marginally: about 1.5% for GPT-3.5-Turbo and about 1% for Claude-1.3 - reader performance saturates long before retriever recall does.",
+    "kind": "single",
+    "scope": "2307.03172",
+    "evidence": [{"paper": "2307.03172", "section": "5 Is More Context Is Always Better? A Case Study With Open-Domain QA"}]
+  },
+  {
+    "question": "What effect does query-aware contextualization have in this paper?",
+    "expected_answer": "Placing the query before and after the data gives near-perfect performance on the synthetic key-value retrieval task, but minimally changes the trends in multi-document question answering.",
+    "kind": "single",
+    "scope": "2307.03172",
+    "evidence": [{"paper": "2307.03172", "section": "4.2 Effect of Query-Aware Contextualization"}]
+  },
+  {
+    "question": "What learning rate does this paper use to fine-tune its models?",
+    "expected_answer": "Not answerable: the paper evaluates existing models and does not fine-tune any of them.",
+    "kind": "abstain",
+    "scope": "2307.03172"
+  },
+  {
+    "question": "What are the four types of reflection tokens this paper uses?",
+    "expected_answer": "Retrieve (whether to retrieve), ISREL (whether a passage is relevant), ISSUP (whether the output is supported by the passage) and ISUSE (how useful the response is).",
+    "kind": "single",
+    "scope": "2310.11511",
+    "evidence": [{"paper": "2310.11511", "section": "3.1 PROBLEM FORMALIZATION AND OVERVIEW"}]
+  },
+  {
+    "question": "Which model is this paper's critic initialized from, and how is its training data created?",
+    "expected_answer": "It is initialized from Llama 2-7B, the same model as the generator. Its training data is created by prompting GPT-4 to generate reflection tokens and distilling them: 4k-20k supervised examples per token type.",
+    "kind": "single",
+    "scope": "2310.11511",
+    "evidence": [{"paper": "2310.11511", "section": "3.2.1 TRAINING THE CRITIC MODEL"}]
+  },
+  {
+    "question": "Which retriever does this paper use by default?",
+    "expected_answer": "Off-the-shelf Contriever-MS MARCO, retrieving up to ten documents per input (top five by default at inference).",
+    "kind": "single",
+    "scope": "2310.11511",
+    "evidence": [{"paper": "2310.11511", "section": "4.3 EXPERIMENTAL SETTINGS"}]
+  },
+  {
+    "question": "What BLEU-4 score does this paper report on NarrativeQA?",
+    "expected_answer": "Not answerable: the paper does not evaluate on NarrativeQA (RAPTOR does, but that is a different paper).",
+    "kind": "abstain",
+    "scope": "2310.11511"
+  },
+  {
+    "question": "Which clustering method does this paper use to build its tree, and how does it choose the number of clusters?",
+    "expected_answer": "Soft clustering with Gaussian Mixture Models over UMAP-reduced embeddings (global, then local clusters), with the number of clusters chosen by the Bayesian Information Criterion (BIC).",
+    "kind": "single",
+    "scope": "2401.18059",
+    "evidence": [{"paper": "2401.18059", "section": "3 METHODS"}]
+  },
+  {
+    "question": "Which querying strategy does this paper use for its main results, and why?",
+    "expected_answer": "The collapsed tree with a 2000-token maximum (roughly the top-20 nodes): it consistently outperformed tree traversal on a QASPER subset because searching all nodes at once retrieves information at the right level of granularity for each question.",
+    "kind": "single",
+    "scope": "2401.18059",
+    "evidence": [{"paper": "2401.18059", "section": "3 METHODS"}]
+  },
+  {
+    "question": "On which datasets is this paper's method evaluated?",
+    "expected_answer": "NarrativeQA, QASPER and QuALITY.",
+    "kind": "single",
+    "scope": "2401.18059",
+    "evidence": [{"paper": "2401.18059", "section": "4 EXPERIMENTS"}]
+  },
+  {
+    "question": "How do Self-RAG and the original RAG model differ in when they retrieve passages?",
+    "expected_answer": "RAG retrieves a fixed number of top-K documents for every input. Self-RAG retrieves on demand: the model predicts a Retrieve reflection token (or a probability threshold is applied) and only retrieves when it is needed.",
+    "kind": "comparison",
+    "evidence": [
+      {"paper": "2005.11401", "section": "2.1 Models"},
+      {"paper": "2310.11511", "section": "3.3 SELF-RAG INFERENCE"}
+    ]
+  },
+  {
+    "question": "Which retriever do the Self-RAG and Lost in the Middle papers each use?",
+    "expected_answer": "Both use Contriever fine-tuned on MS MARCO: Self-RAG as its default retriever, Lost in the Middle to collect distractor documents and in its open-domain QA case study.",
+    "kind": "comparison",
+    "evidence": [
+      {"paper": "2310.11511", "section": "4.3 EXPERIMENTAL SETTINGS"},
+      {"paper": "2307.03172", "section": "2.1 Experimental Setup"}
+    ]
+  },
+  {
+    "question": "RAPTOR's related work cites a study showing that models underuse long-range context. What performance pattern did that study find as relevant information moves through the context?",
+    "expected_answer": "RAPTOR cites Liu et al. (2023), the Lost in the Middle paper, which found a U-shaped curve: performance is best when relevant information is at the beginning or end of the context and worst in the middle.",
+    "kind": "multi_hop",
+    "evidence": [
+      {"paper": "2401.18059", "section": "2 RELATED WORK"},
+      {"paper": "2307.03172", "section": "2.3 Results and Discussion"}
+    ]
+  },
+  {
+    "question": "Self-RAG's default retriever was fine-tuned on a passage-ranking dataset. What MRR@10 does the ColBERT paper report for re-ranking with ColBERT on that dataset's dev set?",
+    "expected_answer": "Self-RAG uses Contriever fine-tuned on MS MARCO; the ColBERT paper reports an MRR@10 of 34.9 on the MS MARCO dev set for ColBERT re-ranking (36.0 for end-to-end retrieval).",
+    "kind": "multi_hop",
+    "evidence": [
+      {"paper": "2310.11511", "section": "4.3 EXPERIMENTAL SETTINGS"},
+      {"paper": "2004.12832", "section": "4.1 Methodology"}
+    ]
+  },
+  {
+    "question": "Which Mistral model does Self-RAG use as its generator?",
+    "expected_answer": "Not answerable: Self-RAG uses Llama 2 7B and 13B as its generator; no Mistral model appears in the corpus.",
+    "kind": "abstain"
+  },
+  {
+    "question": "What accuracy does RAPTOR report on HotpotQA?",
+    "expected_answer": "Not answerable: RAPTOR is evaluated on NarrativeQA, QASPER and QuALITY; HotpotQA does not appear in the corpus.",
+    "kind": "abstain"
+  }
+]

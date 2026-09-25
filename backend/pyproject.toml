@@ -18,6 +18,8 @@ dependencies = [
     "docling>=2.15",
     "FlagEmbedding>=1.3",
     "arxiv>=2.1",
+    "numpy>=2.0",
+    "scikit-learn>=1.5",
 ]
 
 [project.optional-dependencies]

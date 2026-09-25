@@ -16,6 +16,7 @@ from abstractrag.rag.embedding.bge_m3 import BgeM3Embedder
 from abstractrag.rag.engine import RagEngine
 from abstractrag.rag.generation.llm_client import LlamaCppClient
 from abstractrag.rag.ingestion.resolver import SourceResolver
+from abstractrag.rag.raptor.tree import TreeBuilder
 from abstractrag.rag.reranking.cross_encoder import CrossEncoderReranker
 from abstractrag.rag.retrieval.hybrid import HybridRetriever
 from abstractrag.rag.summarization.map_reduce import MapReduceSummarizer
@@ -57,6 +58,7 @@ def build_engine(settings: Settings) -> RagEngine:
         ),
         summarizer=MapReduceSummarizer(llm=llm, settings=settings.summarization),
         agent=build_agent(settings, llm),
+        tree_builder=TreeBuilder(llm=llm, embedder=embedder, settings=settings.raptor),
     )
 
 

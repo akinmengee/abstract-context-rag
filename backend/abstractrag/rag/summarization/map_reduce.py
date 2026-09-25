@@ -6,8 +6,9 @@ each section from its real text; reduce writes the answer from those summaries,
 citing them by number.
 
 The cost is the honest trade-off: one LLM call per section plus one, where a
-normal answer costs one. rag.md section 8.1, and phase 6 (RAPTOR) exists to move
-this cost to indexing time.
+normal answer costs one (rag.md section 8.1). With summarization.method raptor
+the map stage is replaced by a tree built at indexing time, and only reduce()
+runs per question (rag.md 7.9.1).
 """
 
 from dataclasses import dataclass
@@ -35,7 +36,7 @@ class MapReduceSummarizer:
         summaries = self._map(question, groups)
         if not summaries:
             return "", []
-        return self._reduce(question, summaries), summaries
+        return self.reduce(question, summaries), summaries
 
     def _map(self, question: str, groups: list[SectionGroup]) -> list[SectionSummary]:
         """One call per group, logged as it goes - this is minutes, not seconds.
@@ -68,7 +69,8 @@ class MapReduceSummarizer:
             )
         return summaries
 
-    def _reduce(self, question: str, summaries: list[SectionSummary]) -> str:
+    def reduce(self, question: str, summaries: list[SectionSummary]) -> str:
+        """Write the answer from numbered section summaries - one LLM call."""
         # No hard cap (finding 2 asked for visibility, not truncation) - just a
         # log if the assembled summaries are large enough to risk the context
         # window, since an overflow there truncates silently, not with an error.

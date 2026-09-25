@@ -65,6 +65,7 @@ class QdrantStore:
                 },
                 payload={
                     "document_id": chunk.document_id,
+                    "level": chunk.metadata.level,
                     "chunk": chunk.model_dump(mode="json"),
                 },
             )
@@ -76,11 +77,34 @@ class QdrantStore:
         """Re-ingesting a source replaces it; chunk IDs are stable but the count may shrink."""
         self.client.delete(
             collection_name=self.collection,
-            points_selector=models.FilterSelector(filter=_document_filter(document_id)),
+            points_selector=models.FilterSelector(filter=_scope(document_id)),
         )
 
+    def delete_tree(self, document_id: str) -> None:
+        """Remove one document's summary nodes; its leaves stay."""
+        self.client.delete(
+            collection_name=self.collection,
+            points_selector=models.FilterSelector(
+                filter=models.Filter(must=[_document_condition(document_id), _TREE_NODE])
+            ),
+        )
+
+    def get_chunks(self, chunk_ids: list[str]) -> list[Chunk]:
+        """Chunks by ID, in the order asked; unknown IDs are skipped."""
+        if not chunk_ids:
+            return []
+        points = self.client.retrieve(
+            collection_name=self.collection, ids=chunk_ids, with_payload=True
+        )
+        by_id = {str(point.id): Chunk.model_validate(point.payload["chunk"]) for point in points}
+        return [by_id[chunk_id] for chunk_id in chunk_ids if chunk_id in by_id]
+
     def search_dense(
-        self, embedding: Embedding, limit: int, document_id: str | None = None
+        self,
+        embedding: Embedding,
+        limit: int,
+        document_id: str | None = None,
+        include_tree: bool = False,
     ) -> list[tuple[Chunk, float]]:
         response = self.client.query_points(
             collection_name=self.collection,
@@ -88,12 +112,16 @@ class QdrantStore:
             using=DENSE_VECTOR,
             limit=limit,
             with_payload=True,
-            query_filter=_document_filter(document_id) if document_id else None,
+            query_filter=_scope(document_id, leaves_only=not include_tree),
         )
         return _to_chunks(response.points)
 
     def search_sparse(
-        self, embedding: Embedding, limit: int, document_id: str | None = None
+        self,
+        embedding: Embedding,
+        limit: int,
+        document_id: str | None = None,
+        include_tree: bool = False,
     ) -> list[tuple[Chunk, float]]:
         if not embedding.sparse:
             return []
@@ -107,23 +135,27 @@ class QdrantStore:
             using=SPARSE_VECTOR,
             limit=limit,
             with_payload=True,
-            query_filter=_document_filter(document_id) if document_id else None,
+            query_filter=_scope(document_id, leaves_only=not include_tree),
         )
         return _to_chunks(response.points)
 
-    def list_chunks(self, document_id: str) -> list[Chunk]:
-        """Every chunk of one document, in reading order.
+    def list_chunks(self, document_id: str, level: int = 0) -> list[Chunk]:
+        """Every chunk of one document at one tree level, in reading order.
 
-        Summarising is a global task, so it needs the whole document rather than
-        what a query retrieves - this scrolls the collection instead of searching
-        it, paging until Qdrant stops handing back an offset.
+        Level 0 is the document itself; summarising and tree building need all
+        of it rather than what a query retrieves, so this scrolls instead of
+        searching, paging until Qdrant stops handing back an offset.
         """
+        if level == 0:
+            scroll_filter = _scope(document_id, leaves_only=True)
+        else:
+            scroll_filter = _scope(document_id, level=level)
         chunks: list[Chunk] = []
         offset = None
         while True:
             points, offset = self.client.scroll(
                 collection_name=self.collection,
-                scroll_filter=_document_filter(document_id),
+                scroll_filter=scroll_filter,
                 limit=_SCROLL_PAGE,
                 offset=offset,
                 with_payload=True,
@@ -139,6 +171,8 @@ class QdrantStore:
         )
         documents: dict[str, dict[str, Any]] = {}
         for point in points:
+            if (point.payload or {}).get("level", 0):
+                continue  # a tree node, not part of the document's own chunks
             chunk = (point.payload or {}).get("chunk", {})
             metadata = chunk.get("metadata", {})
             entry = documents.setdefault(
@@ -155,10 +189,27 @@ class QdrantStore:
         return list(documents.values())[:limit]
 
 
-def _document_filter(document_id: str) -> models.Filter:
-    return models.Filter(
-        must=[models.FieldCondition(key="document_id", match=models.MatchValue(value=document_id))]
-    )
+# Points written before tree levels existed have no "level" key; a range
+# condition never matches a missing key, so must_not keeps them as leaves.
+_TREE_NODE = models.FieldCondition(key="level", range=models.Range(gt=0))
+
+
+def _document_condition(document_id: str) -> models.FieldCondition:
+    return models.FieldCondition(key="document_id", match=models.MatchValue(value=document_id))
+
+
+def _scope(
+    document_id: str | None, leaves_only: bool = False, level: int | None = None
+) -> models.Filter | None:
+    must: list[models.Condition] = []
+    if document_id:
+        must.append(_document_condition(document_id))
+    if level:
+        must.append(models.FieldCondition(key="level", match=models.MatchValue(value=level)))
+    must_not = [_TREE_NODE] if leaves_only else []
+    if not must and not must_not:
+        return None
+    return models.Filter(must=must or None, must_not=must_not or None)
 
 
 def _to_chunks(points: list[Any]) -> list[tuple[Chunk, float]]:

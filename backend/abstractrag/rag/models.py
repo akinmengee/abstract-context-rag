@@ -23,6 +23,11 @@ def chunk_id_for(document_id: str, index: int) -> str:
     return str(uuid.uuid5(_ID_NAMESPACE, f"{document_id}:{index}"))
 
 
+def node_id_for(document_id: str, level: int, position: int) -> str:
+    """Deterministic ID for a RAPTOR tree node, so rebuilding a tree replaces it."""
+    return str(uuid.uuid5(_ID_NAMESPACE, f"{document_id}:tree:{level}:{position}"))
+
+
 class SourceType(str, Enum):
     PDF = "pdf"
     WIKIPEDIA = "wikipedia"
@@ -70,6 +75,11 @@ class ChunkMetadata(BaseModel):
     section_path: list[str] = Field(default_factory=list)
     page: int | None = None
     block_types: list[BlockType] = Field(default_factory=list)
+    # 0 for a chunk of the source; n > 0 for a RAPTOR summary node n levels up.
+    level: int = 0
+    # Tree nodes only: the leaf chunks the summary covers. Verification checks a
+    # claim citing a node against these leaves' text, never the summary itself.
+    source_ids: list[str] = Field(default_factory=list)
 
 
 class Chunk(BaseModel):
@@ -167,3 +177,5 @@ class IngestResult(BaseModel):
     origin: str
     chunk_count: int
     page_count: int | None = None
+    # RAPTOR summary nodes built at ingest; 0 unless raptor.build_on_ingest.
+    tree_nodes: int = 0

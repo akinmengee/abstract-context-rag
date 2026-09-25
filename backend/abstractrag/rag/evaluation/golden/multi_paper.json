@@ -128,12 +128,12 @@
   },
   {
     "question": "What MRR@10 does RAPTOR achieve on MS MARCO?",
-    "expected_answer": "Not answerable: none of the ingested papers covers RAPTOR.",
+    "expected_answer": "Not answerable: RAPTOR is evaluated on NarrativeQA, QASPER and QuALITY, not MS MARCO (ColBERT reports MRR@10 on MS MARCO, but that is a different model).",
     "kind": "abstain"
   },
   {
-    "question": "How many parameters does the Self-RAG critic model have?",
-    "expected_answer": "Not answerable: none of the ingested papers covers Self-RAG.",
+    "question": "How does GraphRAG use community summaries to answer global questions?",
+    "expected_answer": "Not answerable: none of the ingested papers covers GraphRAG.",
     "kind": "abstain"
   },
   {

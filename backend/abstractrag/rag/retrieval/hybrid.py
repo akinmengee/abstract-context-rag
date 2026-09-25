@@ -36,16 +36,17 @@ class HybridRetriever:
         limit = limit or self.settings.candidates
         embedding = self.embedder.embed_one(query)
         mode = self.settings.mode
+        tree = self.settings.include_tree_nodes
 
         if mode == "dense":
-            results = self.store.search_dense(embedding, limit, document_id)
+            results = self.store.search_dense(embedding, limit, document_id, include_tree=tree)
             return [RetrievedChunk(chunk=chunk, score=score) for chunk, score in results]
 
         if mode == "sparse":
-            results = self.store.search_sparse(embedding, limit, document_id)
+            results = self.store.search_sparse(embedding, limit, document_id, include_tree=tree)
             return [RetrievedChunk(chunk=chunk, score=score) for chunk, score in results]
 
-        dense_results = self.store.search_dense(embedding, limit, document_id)
-        sparse_results = self.store.search_sparse(embedding, limit, document_id)
+        dense_results = self.store.search_dense(embedding, limit, document_id, include_tree=tree)
+        sparse_results = self.store.search_sparse(embedding, limit, document_id, include_tree=tree)
         fused = rrf.fuse([dense_results, sparse_results], k=self.settings.rrf_k)
         return fused[:limit]

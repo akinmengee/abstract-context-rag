@@ -2,10 +2,21 @@
 
 from collections.abc import Iterator
 
-from abstractrag.core.config import RetrievalSettings, Settings, VerificationSettings
+from abstractrag.core.config import (
+    RetrievalSettings,
+    Settings,
+    SummarizationSettings,
+    VerificationSettings,
+)
 from abstractrag.rag.engine import RagEngine
 from abstractrag.rag.generation.prompts import ABSTAIN_MESSAGE, ABSTAIN_SENTINEL
-from abstractrag.rag.models import ClaimVerdict, RetrievedChunk, SectionSummary, VerifiedClaim
+from abstractrag.rag.models import (
+    ClaimVerdict,
+    RetrievedChunk,
+    SectionSummary,
+    VerifiedClaim,
+    node_id_for,
+)
 from tests.conftest import make_chunk
 
 
@@ -88,11 +99,26 @@ class FakeVerifier:
 
 
 class FakeStore:
-    def __init__(self, chunks: list = None) -> None:
+    def __init__(self, chunks: list = None, nodes: dict | None = None) -> None:
         self.chunks = chunks or []
+        self.nodes = nodes or {}
+        self.deleted_trees: list[str] = []
+        self.upserted: list = []
+        self.lookups: list[list[str]] = []
 
-    def list_chunks(self, document_id: str) -> list:
-        return list(self.chunks)
+    def list_chunks(self, document_id: str, level: int = 0) -> list:
+        return list(self.chunks) if level == 0 else list(self.nodes.get(level, []))
+
+    def delete_tree(self, document_id: str) -> None:
+        self.deleted_trees.append(document_id)
+
+    def upsert_chunks(self, chunks, embeddings) -> None:
+        self.upserted.extend(chunks)
+
+    def get_chunks(self, chunk_ids: list[str]) -> list:
+        self.lookups.append(list(chunk_ids))
+        by_id = {chunk.chunk_id: chunk for chunk in self.chunks}
+        return [by_id[i] for i in chunk_ids if i in by_id]
 
 
 class FakeSummarizer:
@@ -107,6 +133,21 @@ class FakeSummarizer:
         self.calls.append((question, chunks))
         return self.text, self.summaries
 
+    def reduce(self, question, summaries):
+        self.reduced = (question, list(summaries))
+        return self.text
+
+
+class FakeTreeBuilder:
+    def __init__(self, nodes: list) -> None:
+        self.nodes = nodes
+        self.built_from: list = []
+
+    def build(self, leaves, release_gpu):
+        self.built_from.append(list(leaves))
+        release_gpu()
+        return [(node, None) for node in self.nodes]
+
 
 def build_engine(
     candidates: list[RetrievedChunk],
@@ -115,10 +156,13 @@ def build_engine(
     verification_enabled: bool = True,
     store=None,
     summarizer=None,
+    tree_builder=None,
+    summary_method: str = "map_reduce",
 ) -> RagEngine:
     settings = Settings(
         retrieval=RetrievalSettings(context_size=3, score_threshold=0.3),
         verification=VerificationSettings(enabled=verification_enabled),
+        summarization=SummarizationSettings(method=summary_method),
     )
     return RagEngine(
         settings=settings,
@@ -131,6 +175,7 @@ def build_engine(
         llm=FakeLLM(response),
         verifier=FakeVerifier(),
         summarizer=summarizer,
+        tree_builder=tree_builder,
     )
 
 
@@ -465,3 +510,112 @@ class TestAsk:
 
         assert answer.section_summaries == []
         assert engine.summarizer.calls == []
+
+
+class TestBuildTree:
+    def test_builds_from_the_leaves_and_replaces_the_old_tree(self):
+        leaves = [make_chunk("a", index=0), make_chunk("b", index=1)]
+        node = make_chunk("summary", index=0)
+        store = FakeStore(leaves)
+        engine = build_engine(
+            [], [], "unused", store=store, tree_builder=FakeTreeBuilder([node])
+        )
+
+        count = engine.build_tree("doc-1")
+
+        assert count == 1
+        assert store.deleted_trees == ["doc-1"]
+        assert store.upserted == [node]
+        assert engine.tree_builder.built_from == [leaves]
+
+    def test_a_document_with_no_chunks_builds_nothing(self):
+        store = FakeStore([])
+        engine = build_engine([], [], "unused", store=store, tree_builder=FakeTreeBuilder([]))
+
+        assert engine.build_tree("missing") == 0
+        assert store.deleted_trees == []
+
+
+def tree_node(text: str, section: str, leaves: list, position: int = 0):
+    """A level-1 node the way TreeBuilder makes one: its own ID, pointing at leaves."""
+    base = make_chunk(text, index=position, section=section)
+    return base.model_copy(
+        update={
+            "chunk_id": node_id_for(base.document_id, 1, position),
+            "metadata": base.metadata.model_copy(
+                update={"level": 1, "source_ids": [leaf.chunk_id for leaf in leaves]}
+            ),
+        }
+    )
+
+
+class TestTreeSummaries:
+    def test_raptor_summaries_reduce_the_level_one_nodes_without_a_map_step(self):
+        leaves = [make_chunk("leaf text", index=0, section="2 Methods")]
+        node = tree_node("methods summary", "2 Methods", leaves)
+        summarizer = FakeSummarizer("Final [1].", [])
+        engine = build_engine(
+            [], [], "unused",
+            store=FakeStore(leaves, nodes={1: [node]}),
+            summarizer=summarizer,
+            summary_method="raptor",
+        )
+
+        answer = engine.summarize(None, "doc-1")
+
+        assert summarizer.calls == []  # no per-section map calls at question time
+        _, summaries = summarizer.reduced
+        assert [(s.marker, s.section, s.text) for s in summaries] == [
+            (1, "2 Methods", "methods summary")
+        ]
+        assert [c.marker for c in answer.citations] == [1]
+
+    def test_tree_summary_claims_are_verified_against_the_leaves(self):
+        leaves = [make_chunk("the real leaf text", index=0, section="2 Methods")]
+        node = tree_node("invented summary", "2 Methods", leaves)
+        engine = build_engine(
+            [], [], "unused",
+            store=FakeStore(leaves, nodes={1: [node]}),
+            summarizer=FakeSummarizer("Final [1].", []),
+            summary_method="raptor",
+        )
+
+        engine.summarize(None, "doc-1")
+
+        assert engine.verifier.last_passages == {1: "the real leaf text"}
+
+    def test_a_document_without_a_tree_falls_back_to_map_reduce(self):
+        leaves = [make_chunk("leaf", index=0)]
+        summarizer = FakeSummarizer("Final.", [])
+        engine = build_engine(
+            [], [], "unused",
+            store=FakeStore(leaves),
+            summarizer=summarizer,
+            summary_method="raptor",
+        )
+
+        engine.summarize(None, "doc-1")
+
+        assert len(summarizer.calls) == 1
+
+
+class TestTreeNodeCitations:
+    def test_a_cited_tree_node_is_verified_against_its_leaves(self):
+        leaf = make_chunk("the real leaf text", index=0)
+        node = tree_node("invented summary", "2 Methods", [leaf], position=7)
+        store = FakeStore([leaf])
+        engine = build_engine(
+            [RetrievedChunk(chunk=node, score=0.9)], [0.9], "Answer [1].", store=store
+        )
+
+        engine.answer("q")
+
+        assert engine.verifier.last_passages == {1: "the real leaf text"}
+        assert store.lookups == [[leaf.chunk_id]]
+
+    def test_answers_from_leaves_only_keep_the_original_verification_path(self):
+        engine = build_engine([candidate("leaf", 0)], [0.9], "Answer [1].", store=FakeStore([]))
+
+        engine.answer("q")
+
+        assert not hasattr(engine.verifier, "last_passages")

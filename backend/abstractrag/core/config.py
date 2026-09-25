@@ -56,6 +56,20 @@ class SummarizationSettings(BaseModel):
     # calls. Kept well under llm.ctx_size (6000 chars is roughly 1500 tokens) so
     # the prompt and the summary still fit without raising the context window.
     max_group_chars: int = 6000
+    # map_reduce: summarise every section per question (rag.md 8.1).
+    # raptor: reduce the document's precomputed level-1 tree nodes instead
+    # (rag.md 7.9.1) - no map calls at question time, but the section summaries
+    # are no longer written with the question in mind.
+    method: str = Field(default="map_reduce", pattern="^(map_reduce|raptor)$")
+
+
+class RaptorSettings(BaseModel):
+    # Chunks per cluster, i.e. per summary. About five chunks (~9000 chars) is
+    # one comfortable summarisation prompt inside llm.ctx_size.
+    cluster_size: int = 5
+    max_levels: int = 3
+    # Off until measured: building costs one LLM call per cluster per document.
+    build_on_ingest: bool = False
 
 
 class AgentSettings(BaseModel):
@@ -87,6 +101,9 @@ class RetrievalSettings(BaseModel):
     context_size: int = 5
     rrf_k: int = 60
     score_threshold: float = 0.3
+    # RAPTOR variant (b): let answer() retrieve summary nodes next to chunks
+    # (collapsed tree, rag.md 7.9.1). Off: retrieval sees source chunks only.
+    include_tree_nodes: bool = False
 
 
 class IngestionSettings(BaseModel):
@@ -112,6 +129,7 @@ class Settings(BaseSettings):
     reranker: RerankerSettings = RerankerSettings()
     verification: VerificationSettings = VerificationSettings()
     summarization: SummarizationSettings = SummarizationSettings()
+    raptor: RaptorSettings = RaptorSettings()
     agent: AgentSettings = AgentSettings()
     qdrant: QdrantSettings = QdrantSettings()
     chunking: ChunkingSettings = ChunkingSettings()

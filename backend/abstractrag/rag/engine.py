@@ -32,6 +32,7 @@ from abstractrag.rag.models import (
     VerifiedClaim,
 )
 from abstractrag.rag.query.router import is_global_question
+from abstractrag.rag.raptor.tree import TreeBuilder
 from abstractrag.rag.reranking.cross_encoder import CrossEncoderReranker
 from abstractrag.rag.retrieval.hybrid import HybridRetriever
 from abstractrag.rag.summarization import prompts as summary_prompts
@@ -70,6 +71,8 @@ class RagEngine:
     summarizer: MapReduceSummarizer
     # None is the plain single-pass pipeline (agent.mode = off).
     agent: CorrectiveAgent | MultiHopAgent | None = None
+    # None until wired: a RAPTOR tree is optional per document (rag.md 7.9.1).
+    tree_builder: TreeBuilder | None = None
 
     def ingest(self, source: SourceInput) -> IngestResult:
         document = self.resolver.resolve(source)
@@ -82,6 +85,9 @@ class RagEngine:
         embeddings = self.embedder.embed([embedding_text(chunk) for chunk in chunks])
         self.store.upsert_chunks(chunks, embeddings)
 
+        tree_nodes = (
+            self.build_tree(document.document_id) if self.settings.raptor.build_on_ingest else 0
+        )
         pages = [block.page for block in document.blocks if block.page is not None]
         return IngestResult(
             document_id=document.document_id,
@@ -90,7 +96,19 @@ class RagEngine:
             origin=document.origin,
             chunk_count=len(chunks),
             page_count=max(pages) if pages else None,
+            tree_nodes=tree_nodes,
         )
+
+    def build_tree(self, document_id: str) -> int:
+        """(Re)build one document's RAPTOR tree; returns the number of nodes."""
+        leaves = self.store.list_chunks(document_id)
+        if not leaves:
+            return 0
+        self.store.delete_tree(document_id)
+        built = self.tree_builder.build(leaves, self._free_gpu_for_llm)
+        if built:
+            self.store.upsert_chunks([node for node, _ in built], [e for _, e in built])
+        return len(built)
 
     def ask(self, question: str, document_id: str | None = None) -> Answer:
         """Route a question to retrieval or map-reduce summarisation.
@@ -186,17 +204,24 @@ class RagEngine:
         """Answer a global question by summarising every section, not the top-k.
 
         "What is this paper about" has its answer spread across the document, so
-        retrieving a handful of chunks cannot reach it. Costs one LLM call per
-        section plus one - see rag.md 8.1.
+        retrieving a handful of chunks cannot reach it. map_reduce costs one LLM
+        call per section plus one (rag.md 8.1); raptor reduces the document's
+        precomputed tree nodes in one call (rag.md 7.9.1).
         """
         chunks = self.store.list_chunks(document_id)
         if not chunks:
             return _abstain([])
 
         self._free_gpu_for_llm()
-        text, summaries = self.summarizer.summarize(
-            question or summary_prompts.DEFAULT_REQUEST, chunks
-        )
+        request = question or summary_prompts.DEFAULT_REQUEST
+        method = self.settings.summarization.method
+        summaries = self._tree_summaries(document_id) if method == "raptor" else []
+        if summaries:
+            text = self.summarizer.reduce(request, summaries)
+        else:
+            if method == "raptor":
+                logger.warning("no RAPTOR tree for %s, summarising with map-reduce", document_id)
+            text, summaries = self.summarizer.summarize(request, chunks)
         if not text:
             return _abstain([])
 
@@ -206,6 +231,23 @@ class RagEngine:
             section_summaries=summaries,
             verified_claims=self._verify_summary(text, summaries, chunks),
         )
+
+    def _tree_summaries(self, document_id: str) -> list[SectionSummary]:
+        """The level-1 tree nodes as numbered section summaries.
+
+        `chunk_ids` are the leaves each node covers, so citations_for() and
+        passages_for() resolve a marker to real source text exactly as they do
+        for map-reduce.
+        """
+        return [
+            SectionSummary(
+                marker=number,
+                section=node.metadata.section or node.metadata.title,
+                text=node.text,
+                chunk_ids=node.metadata.source_ids,
+            )
+            for number, node in enumerate(self.store.list_chunks(document_id, level=1), start=1)
+        ]
 
     def _verify_summary(
         self, text: str, summaries: list[SectionSummary], chunks: list[Chunk]
@@ -266,7 +308,34 @@ class RagEngine:
         """
         if not self.settings.verification.enabled:
             return []
-        return self.verifier.verify(split_claims(text), citations, chunks)
+        claims = split_claims(text)
+        if not any(chunk.chunk.metadata.level for chunk in chunks):
+            return self.verifier.verify(claims, citations, chunks)
+        return self.verifier.verify_passages(claims, self._source_passages(citations, chunks))
+
+    def _source_passages(
+        self, citations: list[Citation], chunks: list[RetrievedChunk]
+    ) -> dict[int, str]:
+        """Marker -> source text, resolving a cited tree node to its leaves.
+
+        A node's own text is a summary; checking a claim against it would let
+        a sentence invented while summarising confirm itself (rag.md 8.1).
+        """
+        by_id = {chunk.chunk.chunk_id: chunk.chunk for chunk in chunks}
+        nodes = [chunk for chunk in by_id.values() if chunk.metadata.level]
+        leaf_ids = sorted({leaf for node in nodes for leaf in node.metadata.source_ids})
+        leaves = {leaf.chunk_id: leaf.text for leaf in self.store.get_chunks(leaf_ids)}
+        passages: dict[int, str] = {}
+        for citation in citations:
+            chunk = by_id.get(citation.chunk_id)
+            if chunk is None:
+                continue
+            passages[citation.marker] = (
+                "\n\n".join(leaves[i] for i in chunk.metadata.source_ids if i in leaves)
+                if chunk.metadata.level
+                else chunk.text
+            )
+        return passages
 
     def _free_gpu_for_llm(self) -> None:
         """Embedder and reranker shared the GPU with the LLM one at a time, never
