@@ -19,7 +19,10 @@ Each entry:
 
 Files: `rag_paper.json` (RAG paper only), `multi_paper.json` (RAG + DPR + ColBERT),
 `core_papers.json` (Lost in the Middle, Self-RAG, RAPTOR, and questions linking them
-to the others), `global.json` (a main-contribution and a summary question per paper).
+to the others), `global.json` (a main-contribution and a summary question per paper),
+`wikipedia.json` (two Wikipedia articles - "Retrieval-augmented generation" and
+"Question answering" - 5 single, 2 global, 3 abstain; no comparison/multi_hop, since
+two unrelated articles don't form a real evidence chain).
 
 Every paper named in `scope` or `evidence` must be ingested first; the run stops
 before the first question otherwise.

@@ -57,13 +57,16 @@ class FakeLLM:
     def __init__(self, response: str) -> None:
         self.response = response
         self.calls = 0
+        self.last_messages: list[dict[str, str]] = []
 
     def complete(self, messages: list[dict[str, str]]) -> str:
         self.calls += 1
+        self.last_messages = messages
         return self.response
 
     def stream(self, messages: list[dict[str, str]]) -> Iterator[str]:
         self.calls += 1
+        self.last_messages = messages
         for index in range(0, len(self.response), 4):
             yield self.response[index : index + 4]
 
@@ -96,6 +99,16 @@ class FakeVerifier:
             )
             for claim in claims
         ]
+
+
+class FakeVisionDescriber:
+    def __init__(self, response: str) -> None:
+        self.response = response
+        self.calls: list[tuple] = []
+
+    def describe(self, image_path, question: str) -> str:
+        self.calls.append((image_path, question))
+        return self.response
 
 
 class FakeStore:
@@ -158,6 +171,7 @@ def build_engine(
     summarizer=None,
     tree_builder=None,
     summary_method: str = "map_reduce",
+    vision=None,
 ) -> RagEngine:
     settings = Settings(
         retrieval=RetrievalSettings(context_size=3, score_threshold=0.3),
@@ -176,11 +190,14 @@ def build_engine(
         verifier=FakeVerifier(),
         summarizer=summarizer,
         tree_builder=tree_builder,
+        vision=vision,
     )
 
 
-def candidate(text: str, index: int, score: float = 0.5) -> RetrievedChunk:
-    return RetrievedChunk(chunk=make_chunk(text, index=index), score=score)
+def candidate(
+    text: str, index: int, score: float = 0.5, image_paths: list[str] | None = None
+) -> RetrievedChunk:
+    return RetrievedChunk(chunk=make_chunk(text, index=index, image_paths=image_paths), score=score)
 
 
 def test_abstains_without_asking_the_llm_when_nothing_is_retrieved():
@@ -619,3 +636,59 @@ class TestTreeNodeCitations:
         engine.answer("q")
 
         assert not hasattr(engine.verifier, "last_passages")
+
+
+class TestFigureVision:
+    def test_a_figure_chunk_is_described_with_the_actual_question(self, tmp_path):
+        image_path = str(tmp_path / "figure.png")
+        vision = FakeVisionDescriber("a bar chart showing accuracy rising with more documents")
+        engine = build_engine(
+            [candidate("generic ingest-time caption", index=0, image_paths=[image_path])],
+            [0.9],
+            "The chart shows [1].",
+            vision=vision,
+        )
+
+        engine.answer("What does the chart show?")
+
+        assert len(vision.calls) == 1
+        called_path, called_question = vision.calls[0]
+        assert str(called_path) == image_path
+        assert called_question == "What does the chart show?"
+        context_text = engine.llm.last_messages[-1]["content"]
+        assert "a bar chart showing accuracy rising" in context_text
+        assert "generic ingest-time caption" not in context_text
+
+    def test_a_chunk_without_images_is_never_sent_to_vision(self):
+        vision = FakeVisionDescriber("should never be used")
+        engine = build_engine(
+            [candidate("plain text", index=0)], [0.9], "Answer [1].", vision=vision
+        )
+
+        engine.answer("a normal question")
+
+        assert vision.calls == []
+
+    def test_vision_is_a_no_op_when_not_configured(self):
+        engine = build_engine(
+            [candidate("generic caption", index=0, image_paths=["some/path.png"])],
+            [0.9],
+            "Answer [1].",
+        )  # vision defaults to None
+
+        answer = engine.answer("a question")
+
+        assert answer.used_chunks[0].chunk.text == "generic caption"
+
+    def test_a_failed_vision_call_falls_back_to_the_original_text(self):
+        vision = FakeVisionDescriber("")  # simulates describe() returning "" on failure
+        engine = build_engine(
+            [candidate("generic caption", index=0, image_paths=["some/path.png"])],
+            [0.9],
+            "Answer [1].",
+            vision=vision,
+        )
+
+        answer = engine.answer("a question")
+
+        assert answer.used_chunks[0].chunk.text == "generic caption"

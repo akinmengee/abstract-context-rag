@@ -254,9 +254,13 @@ def _print_report(report: EvaluationReport) -> None:
     typer.echo(
         f"\nrecall@{report.k}: {report.recall_at_k:.2f}"
         f"   MRR: {report.mrr:.2f}"
-        f"   evidence recall: {report.evidence_recall:.2f}"
         f"   abstain accuracy: {report.abstain_accuracy:.2f}"
         f"   chunks/answer: {report.mean_context_chunks:.1f}"
+        + (
+            ""
+            if report.evidence_recall is None
+            else f"   evidence recall: {report.evidence_recall:.2f}"
+        )
         + ("" if report.faithfulness is None else f"   faithfulness: {report.faithfulness:.2f}")
         + ("" if report.accuracy is None else f"   accuracy: {report.accuracy:.2f}")
         + f"   secs/question: {report.mean_seconds:.1f}"

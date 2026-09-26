@@ -15,6 +15,7 @@ from abstractrag.rag.chunking.section_aware import SectionAwareChunker
 from abstractrag.rag.embedding.bge_m3 import BgeM3Embedder
 from abstractrag.rag.engine import RagEngine
 from abstractrag.rag.generation.llm_client import LlamaCppClient
+from abstractrag.rag.generation.vision import VisionDescriber
 from abstractrag.rag.ingestion.resolver import SourceResolver
 from abstractrag.rag.raptor.tree import TreeBuilder
 from abstractrag.rag.reranking.cross_encoder import CrossEncoderReranker
@@ -40,9 +41,10 @@ def build_engine(settings: Settings) -> RagEngine:
     embedder = BgeM3Embedder(settings.embedding)
     store = QdrantStore(settings.qdrant, settings.embedding)
     llm = LlamaCppClient(settings.llm)
+    figures_dir = settings.ingestion.resolved_storage_dir() / "figures"
     return RagEngine(
         settings=settings,
-        resolver=SourceResolver(settings.ingestion),
+        resolver=SourceResolver(settings.ingestion, settings.llm.base_url, figures_dir),
         chunker=SectionAwareChunker(settings.chunking),
         embedder=embedder,
         store=store,
@@ -59,6 +61,9 @@ def build_engine(settings: Settings) -> RagEngine:
         summarizer=MapReduceSummarizer(llm=llm, settings=settings.summarization),
         agent=build_agent(settings, llm),
         tree_builder=TreeBuilder(llm=llm, embedder=embedder, settings=settings.raptor),
+        vision=VisionDescriber(settings.vision, settings.llm.base_url)
+        if settings.vision.enabled
+        else None,
     )
 
 

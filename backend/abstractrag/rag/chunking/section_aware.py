@@ -34,7 +34,7 @@ class SectionAwareChunker:
     def chunk(self, document: ParsedDocument) -> list[Chunk]:
         chunks: list[Chunk] = []
         for section_path, blocks in self._sections(document):
-            for text, pages, block_types in self._split(blocks):
+            for text, pages, block_types, image_paths in self._split(blocks):
                 index = len(chunks)
                 chunks.append(
                     Chunk(
@@ -51,6 +51,7 @@ class SectionAwareChunker:
                             section_path=list(section_path),
                             page=min(pages) if pages else None,
                             block_types=block_types,
+                            image_paths=image_paths,
                         ),
                     )
                 )
@@ -92,7 +93,8 @@ class SectionAwareChunker:
 
             pages = sorted({block.page for block in piece if block.page is not None})
             block_types = sorted({block.block_type for block in piece})
-            yield text, pages, block_types
+            image_paths = [block.image_path for block in piece if block.image_path]
+            yield text, pages, block_types, image_paths
 
     def _group(self, blocks: list[DocumentBlock]) -> list[list[DocumentBlock]]:
         """Split a section's blocks at the target size, merging a too-short tail back."""

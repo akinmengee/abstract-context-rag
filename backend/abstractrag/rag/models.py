@@ -41,6 +41,7 @@ class BlockType(str, Enum):
     TABLE = "table"
     CAPTION = "caption"
     FORMULA = "formula"
+    FIGURE = "figure"
     OTHER = "other"
 
 
@@ -51,6 +52,10 @@ class DocumentBlock(BaseModel):
     block_type: BlockType = BlockType.PARAGRAPH
     section_path: list[str] = Field(default_factory=list)  # heading hierarchy, outermost first
     page: int | None = None
+    # A FIGURE block's saved image, for query-time vision (rag.md 7.9.4) -
+    # None for every other block type, and for a figure when
+    # ingestion.figures is disabled.
+    image_path: str | None = None
 
 
 class ParsedDocument(BaseModel):
@@ -75,6 +80,10 @@ class ChunkMetadata(BaseModel):
     section_path: list[str] = Field(default_factory=list)
     page: int | None = None
     block_types: list[BlockType] = Field(default_factory=list)
+    # Saved figure images this chunk's blocks carry (rag.md 7.9.4) - usually
+    # 0 or 1, more if several figures land in one chunk. Never sent to Qdrant
+    # for embedding, only read back at answer time.
+    image_paths: list[str] = Field(default_factory=list)
     # 0 for a chunk of the source; n > 0 for a RAPTOR summary node n levels up.
     level: int = 0
     # Tree nodes only: the leaf chunks the summary covers. Verification checks a

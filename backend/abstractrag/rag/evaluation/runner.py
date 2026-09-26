@@ -206,9 +206,7 @@ def _report(
         recall_at_k=_mean([recall_at_k(r.retrieved, q.evidence[0], k) for q, r in singles]),
         mrr=_mean([reciprocal_rank(r.retrieved, q.evidence[0]) for q, r in singles]),
         abstain_accuracy=_mean([r.abstain_correct for r in results]),
-        evidence_recall=_mean(
-            [r.evidence_recall for r in results if r.evidence_recall is not None]
-        ),
+        evidence_recall=_mean_or_none([r.evidence_recall for r in results]),
         mean_context_chunks=_mean([len(r.retrieved) for r in results if not r.abstained]),
         mean_seconds=_mean([r.seconds for r in results]),
         supported_claims=_mean_or_none([r.supported_claims for r in results]),

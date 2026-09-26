@@ -106,14 +106,48 @@ class RetrievalSettings(BaseModel):
     include_tree_nodes: bool = False
 
 
+class PictureDescriptionSettings(BaseModel):
+    # Off by default: three vision models were tried live (rag.md 7.9.3) and
+    # none reached a quality worth the extra ingest time - moondream
+    # hallucinates, qwen2.5vl:3b cannot run on GPU on this card at all (a
+    # known Ollama bug, github.com/ollama/ollama/issues/13687), and
+    # granite3.2-vision:2b is honest but too generic to be useful.
+    enabled: bool = False
+    # granite3.2-vision:2b: the only one of the three that never hallucinated
+    # on a real figure. Not qwen2.5vl - it loads 100% on CPU on this GPU
+    # regardless of quantization, per the Ollama issue above.
+    model: str = "granite3.2-vision:2b"
+    prompt: str = "Describe this figure from a research paper in one or two sentences."
+    timeout_seconds: float = 60.0
+
+
+class FigureExtractionSettings(BaseModel):
+    # Off by default: costs ingest time and disk space for no benefit until
+    # vision.enabled is also on (rag.md 7.9.4) - a saved image nothing ever
+    # looks at is pure waste.
+    enabled: bool = False
+
+
 class IngestionSettings(BaseModel):
     storage_dir: str = "data/documents"
     user_agent: str = "abstract-context-rag/0.1"
+    picture_description: PictureDescriptionSettings = PictureDescriptionSettings()
+    figures: FigureExtractionSettings = FigureExtractionSettings()
 
     def resolved_storage_dir(self) -> Path:
         """Absolute storage path; relative values are anchored at the repo root."""
         path = Path(self.storage_dir)
         return path if path.is_absolute() else PROJECT_ROOT / path
+
+
+class VisionSettings(BaseModel):
+    # Off by default: needs ingestion.figures.enabled too (a saved image to
+    # look at), and a vision model pulled in Ollama. granite3.2-vision:2b is
+    # the only one of three tried live that runs on GPU without
+    # hallucinating (rag.md 7.9.3/7.9.4).
+    enabled: bool = False
+    model: str = "granite3.2-vision:2b"
+    timeout_seconds: float = 60.0
 
 
 class Settings(BaseSettings):
@@ -135,6 +169,7 @@ class Settings(BaseSettings):
     chunking: ChunkingSettings = ChunkingSettings()
     retrieval: RetrievalSettings = RetrievalSettings()
     ingestion: IngestionSettings = IngestionSettings()
+    vision: VisionSettings = VisionSettings()
 
     @classmethod
     def settings_customise_sources(

@@ -140,8 +140,9 @@ class EvaluationReport(BaseModel):
     recall_at_k: float
     mrr: float
     abstain_accuracy: float
-    # Over comparison and multi-hop questions.
-    evidence_recall: float
+    # Over comparison and multi-hop questions; None when a golden set has neither
+    # (their mean over an empty list would silently read as a real 0.00).
+    evidence_recall: float | None = None
     # Chunks per answer: an engine that retrieves more can raise evidence recall
     # just by retrieving more, and this keeps that visible.
     mean_context_chunks: float

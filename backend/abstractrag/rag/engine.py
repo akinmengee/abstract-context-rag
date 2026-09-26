@@ -6,6 +6,7 @@ or the store for a fake without touching this file.
 
 from collections.abc import Iterator
 from dataclasses import dataclass
+from pathlib import Path
 
 from pydantic import BaseModel
 
@@ -19,6 +20,7 @@ from abstractrag.rag.chunking.section_aware import SectionAwareChunker, embeddin
 from abstractrag.rag.embedding.bge_m3 import BgeM3Embedder
 from abstractrag.rag.generation import prompts
 from abstractrag.rag.generation.llm_client import LlamaCppClient
+from abstractrag.rag.generation.vision import VisionDescriber
 from abstractrag.rag.ingestion.base import SourceInput
 from abstractrag.rag.ingestion.resolver import SourceResolver
 from abstractrag.rag.models import (
@@ -73,6 +75,10 @@ class RagEngine:
     agent: CorrectiveAgent | MultiHopAgent | None = None
     # None until wired: a RAPTOR tree is optional per document (rag.md 7.9.1).
     tree_builder: TreeBuilder | None = None
+    # None unless ingestion.figures and vision are both enabled (rag.md 7.9.4):
+    # describes a retrieved figure with the user's real question instead of a
+    # fixed ingest-time caption.
+    vision: VisionDescriber | None = None
 
     def ingest(self, source: SourceInput) -> IngestResult:
         document = self.resolver.resolve(source)
@@ -134,7 +140,7 @@ class RagEngine:
             return _abstain(selection.chunks, selection.steps)
 
         self._free_gpu_for_llm()
-        context_chunks = selection.chunks
+        context_chunks = self._augment_figures(question, selection.chunks)
         # used_chunks keeps rank order (clearer for the debug UI); the LLM gets the
         # lost-in-the-middle order instead, and citation markers follow that order.
         context, citations = prompts.build_context(prompts.order_for_context(context_chunks))
@@ -159,7 +165,7 @@ class RagEngine:
             return
 
         self._free_gpu_for_llm()
-        context_chunks = selection.chunks
+        context_chunks = self._augment_figures(question, selection.chunks)
         context, citations = prompts.build_context(prompts.order_for_context(context_chunks))
         yield AnswerEvent(event="citations", citations=citations)
 
@@ -336,6 +342,34 @@ class RagEngine:
                 else chunk.text
             )
         return passages
+
+    def _augment_figures(
+        self, question: str, chunks: list[RetrievedChunk]
+    ) -> list[RetrievedChunk]:
+        """Swap a figure chunk's text for a fresh answer to this exact question
+        (rag.md 7.9.4) - never written back to the store, this query only.
+        Falls back to the chunk's existing text if vision is off or the call
+        failed, so a bad figure lookup never turns into a missing chunk."""
+        if self.vision is None:
+            return chunks
+
+        augmented: list[RetrievedChunk] = []
+        for retrieved in chunks:
+            paths = retrieved.chunk.metadata.image_paths
+            if not paths:
+                augmented.append(retrieved)
+                continue
+            descriptions = [
+                text
+                for path in paths
+                if (text := self.vision.describe(Path(path), question))
+            ]
+            if not descriptions:
+                augmented.append(retrieved)
+                continue
+            new_chunk = retrieved.chunk.model_copy(update={"text": "\n\n".join(descriptions)})
+            augmented.append(retrieved.model_copy(update={"chunk": new_chunk}))
+        return augmented
 
     def _free_gpu_for_llm(self) -> None:
         """Embedder and reranker shared the GPU with the LLM one at a time, never

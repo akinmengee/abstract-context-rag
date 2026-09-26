@@ -16,9 +16,11 @@ _UNSAFE_CHARS = re.compile(r"[^A-Za-z0-9._-]")
 
 
 class SourceResolver:
-    def __init__(self, settings: IngestionSettings) -> None:
+    def __init__(self, settings: IngestionSettings, llm_base_url: str, figures_dir: Path) -> None:
         self.settings = settings
-        self.pdf_source = PdfSource()
+        self.pdf_source = PdfSource(
+            settings.picture_description, llm_base_url, settings.figures, figures_dir
+        )
         self.wikipedia_source = WikipediaSource()
 
     @property

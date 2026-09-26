@@ -115,3 +115,31 @@ ingestion:
   # Downloaded PDFs and parser output land here (gitignored).
   storage_dir: "data/documents"
   user_agent: "abstract-context-rag/0.1 (https://github.com/akinmengee/abstract-context-rag)"
+  # Docling's built-in picture-description step (rag.md 7.9.3): describes each
+  # figure with a vision model over Ollama's /v1 endpoint - the same server as
+  # the main LLM, a second model tag. Off: three models tried live on this 6GB
+  # card - moondream hallucinates, qwen2.5vl:3b never touches the GPU at all
+  # (Ollama issue #13687), granite3.2-vision:2b is grounded but too generic to
+  # be worth the ~2 min/paper cost yet. PdfSource drops figures while false.
+  picture_description:
+    enabled: false
+    model: "granite3.2-vision:2b"
+    prompt: "Describe this figure from a research paper in one or two sentences."
+    timeout_seconds: 60.0
+  # Query-time figure vision (rag.md 7.9.4): saves each figure's cropped
+  # image at ingest, with no captioning cost there - a vision model looks at
+  # it later, with the user's actual question, only for chunks retrieval
+  # actually selected. Off until measured end to end alongside `vision` below.
+  figures:
+    enabled: false
+
+vision:
+  # Pairs with ingestion.figures.enabled: describes a retrieved figure with
+  # the user's real question instead of a fixed ingest-time caption
+  # (rag.md 7.9.4). granite3.2-vision:2b: confirmed live at 100% GPU, 3.8 GB,
+  # no hallucination - the other two vision models tried either hallucinate
+  # (moondream) or never reach the GPU due to an open Ollama bug (qwen2.5vl,
+  # ollama/ollama#13687).
+  enabled: false
+  model: "granite3.2-vision:2b"
+  timeout_seconds: 60.0

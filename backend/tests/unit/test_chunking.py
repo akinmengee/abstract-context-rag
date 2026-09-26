@@ -84,3 +84,26 @@ def test_embedding_text_prefixes_the_section_breadcrumb():
 
     assert embedding_text(chunk).startswith("Test Paper > Method")
     assert chunk.text == "Body."
+
+
+def test_a_figure_blocks_image_path_reaches_the_chunk():
+    document = make_document(
+        [
+            make_block(
+                "Figure 3: accuracy over time.",
+                section=["Results"],
+                block_type=BlockType.FIGURE,
+                image_path="data/documents/figures/doc1/0.png",
+            )
+        ]
+    )
+
+    chunks = chunker().chunk(document)
+
+    assert chunks[0].metadata.image_paths == ["data/documents/figures/doc1/0.png"]
+
+
+def test_a_chunk_with_no_figure_blocks_has_no_image_paths():
+    chunks = chunker().chunk(make_document([make_block("Plain paragraph.", section=["Results"])]))
+
+    assert chunks[0].metadata.image_paths == []

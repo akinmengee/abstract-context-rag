@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from abstractrag.core.errors import InvalidInputError, SourceNotFoundError
@@ -7,6 +9,7 @@ from abstractrag.rag.ingestion.fetchers.wikipedia import (
     WikipediaArticle,
     normalize_article_title,
 )
+from abstractrag.rag.ingestion.sources.pdf_source import _figure_description, figure_image_path
 from abstractrag.rag.ingestion.sources.wikipedia_source import WikipediaSource
 from abstractrag.rag.models import BlockType, SourceType
 
@@ -95,3 +98,32 @@ class TestWikipediaSource:
 
         assert document.extra["revision_id"] == "42"
         assert document.origin == self.article.url
+
+
+class TestFigureDescription:
+    def test_reads_the_description_annotation(self):
+        item = SimpleNamespace(
+            annotations=[SimpleNamespace(kind="description", text=" A bar chart of accuracy. ")]
+        )
+        assert _figure_description(item) == "A bar chart of accuracy."
+
+    def test_empty_without_annotations(self):
+        assert _figure_description(SimpleNamespace(annotations=[])) == ""
+
+    def test_empty_when_the_item_has_no_annotations_attribute(self):
+        assert _figure_description(SimpleNamespace()) == ""
+
+    def test_ignores_annotations_of_a_different_kind(self):
+        item = SimpleNamespace(annotations=[SimpleNamespace(kind="classification", text="chart")])
+        assert _figure_description(item) == ""
+
+
+class TestFigureImagePath:
+    def test_builds_a_path_under_the_documents_directory(self, tmp_path):
+        path = figure_image_path(tmp_path, "doc-123", 0)
+        assert path == tmp_path / "doc-123" / "0.png"
+
+    def test_different_indices_do_not_collide(self, tmp_path):
+        first = figure_image_path(tmp_path, "doc-123", 0)
+        second = figure_image_path(tmp_path, "doc-123", 1)
+        assert first != second

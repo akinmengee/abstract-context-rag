@@ -1,0 +1,66 @@
+[
+  {
+    "question": "What are the key stages of the RAG process?",
+    "expected_answer": "Converting data into embeddings and storing them in a vector database, retrieving the most relevant documents with a document retriever, feeding the retrieved information into the LLM via prompt engineering, and generating output based on both the query and the retrieved documents.",
+    "kind": "single",
+    "scope": "Retrieval-augmented_generation",
+    "evidence": [{"paper": "Retrieval-augmented_generation", "section": "RAG key stages"}]
+  },
+  {
+    "question": "What is RAG poisoning?",
+    "expected_answer": "A technique where malicious actors flood the information space that a RAG system retrieves from with misleading or biased content, so the system's retrieval and generation reproduce that bias or misinformation.",
+    "kind": "single",
+    "scope": "Retrieval-augmented_generation",
+    "evidence": [{"paper": "Retrieval-augmented_generation", "section": "RAG poisoning"}]
+  },
+  {
+    "question": "What are some applications of retrieval-augmented generation?",
+    "expected_answer": "Grounding large language model outputs in external knowledge sources, for example in healthcare, and enabling LLM-based chatbots to access internal company data or authoritative sources so responses reflect domain-specific or up-to-date information not in the model's training data.",
+    "kind": "single",
+    "scope": "Retrieval-augmented_generation",
+    "evidence": [{"paper": "Retrieval-augmented_generation", "section": "Applications"}]
+  },
+  {
+    "question": "What are the main approaches used to build question answering systems?",
+    "expected_answer": "Rule-based systems, statistical systems, hybrid systems, and knowledge graph-based systems.",
+    "kind": "single",
+    "scope": "Question_answering",
+    "evidence": [{"paper": "Question_answering", "section": "Types"}]
+  },
+  {
+    "question": "How is a question answering system typically architected?",
+    "expected_answer": "A question classifier module determines the question and expected answer type. Modern open-domain systems often use a retriever-reader architecture (a retriever finds relevant documents, a reader infers the answer from them), while end-to-end transformer models such as GPT-3, T5 or BART can answer from parameters alone, without an external knowledge source.",
+    "kind": "single",
+    "scope": "Question_answering",
+    "evidence": [{"paper": "Question_answering", "section": "Architecture"}]
+  },
+  {
+    "question": "Summarize this article.",
+    "expected_answer": "Retrieval-augmented generation (RAG) improves large language models by retrieving external information before generating a response, giving access to up-to-date or domain-specific data and reducing hallucination. It is not immune to error: misleading sources or deliberate RAG poisoning can still produce false claims. Retrieval itself relies on encoding text into sparse or dense vectors, often combined in a hybrid search, with chunking used to make large texts retrievable in detail.",
+    "kind": "global",
+    "scope": "Retrieval-augmented_generation"
+  },
+  {
+    "question": "Summarize this article.",
+    "expected_answer": "Question answering (QA) is a field of information retrieval and natural language processing concerned with building systems that automatically answer questions posed in natural language. Approaches range from rule-based and statistical methods to hybrid and knowledge-graph-based systems, and architectures range from retriever-reader pipelines to end-to-end transformer models; open-domain QA answers questions over a broad, unrestricted set of topics rather than one closed domain.",
+    "kind": "global",
+    "scope": "Question_answering"
+  },
+  {
+    "question": "What score threshold was used in the Lost in the Middle paper's ablation study?",
+    "expected_answer": "",
+    "kind": "abstain",
+    "scope": "Retrieval-augmented_generation"
+  },
+  {
+    "question": "What is RAG poisoning?",
+    "expected_answer": "",
+    "kind": "abstain",
+    "scope": "Question_answering"
+  },
+  {
+    "question": "What is the current population of France?",
+    "expected_answer": "",
+    "kind": "abstain"
+  }
+]

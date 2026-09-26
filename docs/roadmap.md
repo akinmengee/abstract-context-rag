@@ -12,9 +12,9 @@ Status: ✅ done · 🚧 in progress · ⬜ not started
 | 3 | Query and verification | Query routing, map-reduce summaries, citation verification | Faithfulness before/after verification; abstain accuracy | 🚧 |
 | 4 | Agentic RAG | Corrective / self-reflective retrieval, multi-paper questions | Multi-hop question accuracy | ✅ |
 | 5 | RAPTOR / GraphRAG | Hierarchical index (RAPTOR); GraphRAG deferred | Global-question accuracy vs map-reduce | ✅ |
-| 6 | Fine-tuning | Embedding → reranker → generator, trained on Kaggle (2x ~20GB GPU) | Retrieval/answer metrics against the base models | ⬜ |
-| 7 | Multimodal | Tables and figures, ColPali | Accuracy on table and number questions | ⬜ |
-| 8 | Wikipedia | Single-article ingestion through the Wikipedia adapter | Same golden-set metrics on a second domain | ⬜ |
+| 6 | Wikipedia | Real end-to-end run of the (already-built) Wikipedia adapter, golden set | Same golden-set metrics on a second domain | ✅ |
+| 7 | Multimodal | Figure captioning via Docling + a second Ollama vision model (tables already handled by Docling) | Three models tried live: `moondream` hallucinates, `qwen2.5vl:3b` hits an open Ollama GPU bug, `granite3.2-vision:2b` is honest but generic - stays off by default | 🚧 |
+| 8 | Fine-tuning | Embedding → reranker → generator, trained on Kaggle (2x ~20GB GPU) | Retrieval/answer metrics against the base models | ⬜ |
 | 9 | Interfaces | React web app, Flutter mobile app, Docker packaging | Runs from one command; usable from a phone | ⬜ |
 | 10 | Deployment (optional) | Auth, rate limiting, HTTPS | — | ⬜ |
 
@@ -491,3 +491,298 @@ Next:
   relevant to it rather than all leaves under every cited node.
 - Try the paper's GMM + UMAP clustering only if a larger corpus shows the
   simple clustering falling short.
+
+## Phase 6 status (Wikipedia)
+
+Order changed again on 2026-09-25: Wikipedia and figure captioning (phase 7)
+can both be built and run end to end locally, so they moved ahead of
+fine-tuning, which needs the user's hand at every Kaggle step. Design:
+`rag.md` 7.9.2.
+
+The adapter itself was not new work: `ingestion/fetchers/wikipedia.py` and
+`ingestion/sources/wikipedia_source.py` were written in phase 1 (the
+TextExtracts API, `== Heading ==` parsing, navigation-section dropping) and
+unit-tested, but never run against the real API and never given a golden
+set. This phase is that measurement.
+
+Done:
+- Ingested "Retrieval-augmented generation" (13 chunks, 4 tree nodes) and
+  "Question answering" (10 chunks, 3 tree nodes) for real. Both went through
+  the full pipeline unmodified: hybrid retrieval, the multi-hop agent,
+  RAPTOR tree building, citation, verification, and `is_global_question()`
+  routing to `summarize()` - all English-only logic, so nothing needed to
+  know an article isn't a paper.
+- `golden/wikipedia.json`: 5 `single`, 2 `global`, 3 `abstain` (one
+  cross-scoped: a question the *other* Wikipedia article would answer, asked
+  with `scope` limited to the one that doesn't cover it). Evidence matching
+  needed no code change - `resolve_papers()` already matches on any substring
+  of a document's `origin`, and a Wikipedia URL's slug (e.g.
+  `Retrieval-augmented_generation`) satisfies that the same way an arXiv ID
+  does.
+- Found and fixed on the way: `uv run` re-syncs the environment against the
+  lock file, and since torch's CUDA build is not something `uv`'s resolver
+  can express (rag.md 3), that silently downgrades it back to the CPU-only
+  wheel - `Torch not compiled with CUDA enabled` on the first embedding call.
+  The fix (`uv pip install torch --index-url .../cu126
+  --reinstall-package torch`) was already documented in rag.md 3; this phase
+  just ran into it again and switched to calling `.venv/Scripts/abstractrag`
+  directly to stop triggering the re-sync.
+- Found and fixed: `EvaluationReport.evidence_recall` used the same
+  empty-list-means-0.0 bug that faithfulness had (phase 5) - a golden set
+  with no `comparison`/`multi_hop` questions (this one) printed `evidence
+  recall: 0.00`, reading as a real score instead of "not applicable". Now
+  `None` and hidden from the summary line, the same fix pattern as
+  faithfulness (`_mean_or_none`).
+
+Measured (`abstractrag eval --entry ask`, 10 questions, verification and
+both judges on):
+
+| kind | n | abstain accuracy | accuracy | supported claims | secs/question |
+|---|---|---|---|---|---|
+| single | 5 | - | 0.80 | 0.87 | 38.3 |
+| global | 2 | - | 1.00 | 1.00 | 13.2 |
+| abstain | 3 | 1.00 | 1.00 | - | 30.9 |
+
+Overall: recall@5 1.00, MRR 1.00, abstain accuracy 1.00, faithfulness 1.00,
+accuracy 0.90, supported claims 0.90.
+
+Findings:
+- **The adapter works end to end with no changes.** Retrieval, RAPTOR,
+  routing, citation and verification all behaved on Wikipedia prose the same
+  way they do on paper text - recall@5 and MRR are both 1.00 at this size,
+  and the router correctly sent both "Summarize this article." questions to
+  `summarize()`.
+- **The one `single` miss is a judge-strictness case, not a wrong answer.**
+  "What is RAG poisoning?" retrieved the right section but this run's
+  multi-hop follow-up pulled a chunk built around one specific named example
+  rather than the general definition; the answer was accurate but framed
+  differently from the hand-written `expected_answer`, and the correctness
+  judge scored it wrong. A manual re-ask of the same question (single-search,
+  no follow-up) answered from the general definition and verified 1/2
+  claims supported.
+- **Dense, single-paragraph text under-cites.** Asking a broad "what is X"
+  question that hits the article's lead paragraph got a nearly
+  verbatim-length answer with exactly one trailing `[1]`, instead of a
+  marker after each claim - 1/14 claims verified, the rest `uncited`.
+  Section-scoped questions (the golden set's actual `single` questions) did
+  not show this: 1/1 to 4/6 claims supported, cited per sentence. Likely
+  cause: the lead paragraph is one dense block of short factual sentences
+  with no internal section markers, unlike a paper's more discursive
+  prose - the model appears to treat reproducing the whole block as one
+  citable unit rather than several. Not reproduced in the golden set itself,
+  so not scored, but a real corpus-specific weakness worth knowing about
+  before writing lead-paragraph questions.
+- The multi-hop agent still forces one follow-up search on every question
+  (phase 4's design, rag.md 7.9), including plain single-fact Wikipedia
+  questions that did not need one - visible in `searches=2` on every
+  answered row above. Cost, not correctness: the follow-up search's own
+  grading step keeps or drops it on its own merits.
+
+Limits, honestly:
+- 10 questions, one domain pairing (RAG-adjacent Wikipedia articles chosen
+  to overlap the existing corpus's topic). A less technical article's prose
+  might expose different weaknesses.
+- No `comparison`/`multi_hop` questions: two unrelated Wikipedia articles
+  don't form a real evidence chain (rag.md 7.9.2), so those metrics are not
+  covered for this domain.
+
+Commit not made - the user commits everything themselves.
+
+## Phase 7 status (figure captioning)
+
+Design: `rag.md` 7.9.3. Finding that shaped it: Docling already exports
+tables as structured markdown and picture captions as their own text block
+(`pdf_source.py`), so the phase 5-era worry about "tables and figures" (see
+the old phase 7 row) was already half solved by the parser - the real gap is
+a figure's *visual* content (a diagram, a plot), which was unconditionally
+dropped.
+
+Done:
+- `BlockType.FIGURE`, a new block type for a figure's description.
+- `ingestion.picture_description` settings (`enabled: false`, `model:
+  "moondream"`, `prompt`, `timeout_seconds`).
+- `PdfSource` configures its `DocumentConverter` with Docling's
+  `do_picture_description` + `PictureDescriptionApiOptions` when enabled,
+  pointed at the same Ollama `/v1` endpoint the main LLM already uses, just
+  a second model tag. A picture's annotation text becomes a `FIGURE` block
+  exactly like any other block - chunking, embedding, retrieval, citation
+  and verification needed no changes.
+- Disabled (the default), behaviour is unchanged: confirmed by re-ingesting
+  RAG (2005.11401) and getting the same chunk count as before this phase.
+
+**VRAM and a first quality pass, tested live (2026-09-25):** `ollama pull
+moondream` (1.7 GB), `enabled: true`, re-ingested Lost in the Middle
+(2307.03172, chosen for being figure-heavy, rag.md 11).
+
+- **A real bug on the first run:** Docling refused with `OperationNotAllowed:
+  Connections to remote services is only allowed when set explicitly` -
+  `do_picture_description` needs `PdfPipelineOptions(enable_remote_services=
+  True)` even for a `localhost` endpoint; Docling's flag means "call out to
+  any API-based model," not "the model is actually remote." Fixed by setting
+  it whenever picture description is enabled.
+- **VRAM fits, no crash.** During parsing (before embedding starts) only
+  `moondream` was resident; Ollama swapped it out for `qwen3:4b-instruct-8k`
+  once RAPTOR tree-building needed the main model - `ollama ps` after the run
+  showed only the 4B model loaded (4.2 GB), 1.9 GB still free on the 6 GB
+  card. The two models were never forced to coexist at their combined size;
+  Ollama's own LRU eviction handled the handoff.
+- **Quality is mixed, on one paper's figures.** 41 chunks (up from 40), 10 of
+  them carrying a figure description. One is roughly on-topic but garbled
+  ("xtremely detailed graph of tokens on y axis and positions with x axes for
+  word retrieval for 4 document types" - for a figure that is, in fact, a
+  position-vs-accuracy graph). Another is a clean hallucination, unrelated to
+  the paper entirely: a figure near "2.2 Models" was described as "a title
+  page of a research paper and online survey by conrad rontgen about nobel
+  laureates in medicine." `moondream` is a ~1.7 GB captioning model with no
+  particular training on scientific figures, and it shows.
+**A second model, same day: `qwen2.5vl:3b` (3.2 GB) - chosen because it is
+specifically strong at charts, layouts and OCR, unlike `moondream`'s
+natural-image captioning. It does not fit this hardware:**
+
+- First few calls failed outright: Ollama returned `model requires more
+  system memory (8.7-8.9 GiB) than is available (8.7-8.9 GiB)` - when a
+  vision model does not fit the 6 GB card fully, Ollama falls back toward
+  system RAM, and this machine's 16 GB (with the ingest process itself
+  already holding a few GB for torch/bge-m3/Docling/RapidOCR) came up just
+  short.
+- Every call after that timed out at 60s, retried, timed out again, for
+  about ten minutes straight (`ReadTimeoutError`, one every ~60-70s from
+  20:14 to 20:25) - the model was never responding, not just slow.
+- The whole ingest still finished (Docling drops a figure it can never
+  describe, same as a disabled picture-description step would), but took
+  17m24s wall-clock for one paper, and produced zero figure blocks - back to
+  40 chunks, identical to `enabled: false`. All cost, no benefit.
+
+**Root cause found (2026-09-27), correcting the read above: this was never a
+hardware-capacity problem, it was Ollama.** `ollama ps` while the "requires
+more system memory" errors were happening showed `qwen2.5vl:3b` loaded at
+**10 GB, 100% CPU** - never touching the GPU at all, on a card that runs the
+4B main LLM at 4.2 GB with no trouble. A direct API call with a tiny 512x384
+synthetic test image (3.5 KB) reproduced the same 90s timeout, ruling out
+"the page image Docling sends is too large" as the cause. This matches a
+known, open Ollama bug
+([ollama/ollama#13687](https://github.com/ollama/ollama/issues/13687)):
+since Ollama 0.13.4, a change in compute-graph memory estimation for the
+qwen2.5vl family inflates the pre-offload memory requirement from ~1.8 GB to
+~6.7 GB, so Ollama abandons GPU placement entirely - reported on an 8 GB
+card, worse on our 6 GB one. Our installed Ollama (0.17.1) is affected, and
+no fix was found as of this writing. Because the bug is in Ollama's own
+memory estimation, not the weights file, fetching the same model as a raw
+GGUF and loading it via a custom Modelfile (`FROM /path/to/file.gguf`,
+exactly how the main LLM is loaded from `models/`) would not have helped -
+same Ollama runtime, same bug.
+
+**A third model, chosen to dodge that bug by being a different architecture
+entirely: `granite3.2-vision:2b` (2.4 GB) - IBM's small vision-language
+model, built specifically for "tables, charts, infographics, plots,
+diagrams."** It is also Docling's own default engine for a separate,
+dedicated chart-extraction feature (`ChartExtractionVlmEngineOptions`,
+untried here - a different pipeline stage from picture-description, local
+HF inference rather than an Ollama call), which was the tell that this
+family is meant for exactly this job.
+
+- Loaded at **100% GPU, 3.8 GB** - confirmed with `ollama ps` immediately
+  after a direct test call (4.9 s for one small synthetic image).
+- Real run on Lost in the Middle: 41 chunks (12 carrying a figure
+  description), 2m16s total - much faster than `qwen2.5vl:3b`'s failed 17m,
+  a bit slower than `moondream`'s under a minute.
+- **No hallucinations** on any of the 12 figures - a real improvement over
+  `moondream`. But the descriptions are generic and repeat a template
+  ("In this image I can see a number of graphs on it, I can see something is
+  written on few axes" / "This image consists of some text on a white color
+  surface. This looks like a text box.") - it identifies *that* something is
+  a chart or a text box, not *what* the chart or text says. A more specific
+  prompt (state the axis labels, legend, and the concrete trend) produced the
+  same genericness on a second run - this looks like a real capability
+  ceiling for a 2 GB model on this hardware, not a prompting problem.
+- Reverted after both tests: `enabled: false`, corpus re-ingested once more
+  to restore the clean 40-chunk state.
+
+**Default candidate model changed from `moondream` to `granite3.2-vision:2b`**
+in both `config.yaml` and the settings' code default - if this is ever turned
+on, grounded-but-vague is a safer failure mode than confident hallucination.
+`enabled` itself stays `false`: neither model tested is good enough to be
+worth the ~2 min/paper cost by default yet.
+
+Limits, honestly: one paper, three vision models, no golden questions written
+against figure content - this is "does it run, and how good, roughly," not a
+measured accuracy number. VRAM headroom was checked with `nvidia-smi`/
+`ollama ps` snapshots, not continuous profiling.
+
+Next, in order of effort: (1) try Docling's dedicated
+`ChartExtractionVlmEngineOptions` (Granite Vision, local HF inference, not
+Ollama) - a purpose-built feature for exactly this, untried so far; (2) look
+for a well-known chart-specific model between `granite3.2-vision`'s 2 GB and
+whatever the next size up costs; (3) accept the current ceiling and decide
+whether a generic-but-honest caption is worth including at all, versus a
+citation-only fallback ("see Figure 3", no attempted description); (4)
+revisit `qwen2.5vl` if Ollama ships a fix for #13687. The mechanics (Docling
+-> vision model -> FIGURE block -> normal citation/verification) are proven
+end to end either way - only the model is still an open question.
+
+Sources:
+- [ollama/ollama#13687 - qwen2.5vl:3b no longer runs on 8GB GPUs since Ollama 0.13.4](https://github.com/ollama/ollama/issues/13687)
+- [granite3.2-vision on Ollama](https://ollama.com/library/granite3.2-vision)
+- [qwen2.5vl:3b on Ollama](https://ollama.com/library/qwen2.5vl:3b)
+
+## Phase 7 continued: query-time figure vision
+
+The three attempts above all shared one assumption: pick a good enough
+model, write one fixed description per figure at ingest time. Design
+(`rag.md` 7.9.4): that assumption is the actual limit, not the model - one
+canned caption cannot anticipate every question a user might ask about a
+figure ("what does it show" and "what's the trend" need different answers).
+Fix: describe a figure with the user's real question, at answer time, not a
+generic prompt at ingest time.
+
+Done:
+- Ingest now only *saves* a figure's cropped image (`ingestion.figures`,
+  independent of `ingestion.picture_description`) - no vision model call, no
+  extra ingest cost beyond writing a PNG. `DocumentBlock.image_path` ->
+  `ChunkMetadata.image_paths` carries it through chunking; a figure with no
+  caption text is no longer dropped as long as its image was saved.
+- `RagEngine._augment_figures()`, called right after context selection in
+  both `answer()` and `stream_answer()`: for every selected chunk carrying an
+  image, `VisionDescriber` sends that image and the actual question (not
+  "describe this figure") to Ollama, and the response replaces the chunk's
+  text for that one query only - nothing is written back to Qdrant. Because
+  only `.text` changes, `prompts.build_context`, citation extraction and
+  verification needed zero changes.
+- Both `ingestion.figures.enabled` and `vision.enabled` stay off by default.
+
+**Live test (2026-09-27), Lost in the Middle, `granite3.2-vision:2b`:**
+ingest with only image-saving on took about the same time as a plain ingest
+and produced no new chunks (a figure with no caption text and no added
+description text does not push any section over the chunking threshold) -
+15 images saved, 12 chunks carrying an `image_paths` entry.
+
+- **The core premise held.** The same image, asked two different real
+  questions ("what does this figure show about modulating input context
+  length" vs. "how many lines are plotted, and what do the axes represent"),
+  produced two different, question-specific responses about line ordering -
+  not a repeated fixed caption. This is what the design set out to prove.
+- **Quality is still uneven, the same way it was at ingest time.** On one
+  figure the model gave a genuinely relevant (if slightly garbled)
+  description of line trends; on another, asked a similarly specific
+  question, it produced a complete non sequitur ("Ramón y Cajal won the
+  Nobel Prize in Physics..." - unrelated to the actual figure). Asking a
+  sharper question does not reliably fix `granite3.2-vision:2b`'s
+  hallucination risk, only sometimes sharpens the answer when it does stay
+  on topic.
+- **The generator's own safety net caught the bad case.** With one
+  hallucinated and one genuinely relevant description in context, a real
+  `abstractrag ask` call about that figure abstained rather than answering
+  confidently from the garbled mix - the grounded-generation design (abstain
+  sentinel, verification) did its job; this is the system behaving safely
+  under a noisy vision result, not a new bug.
+
+Limits, honestly: one paper, one model, a handful of manually-asked
+questions - this shows the mechanism works and roughly how good the model
+is, not a measured accuracy number. No golden questions target figure
+content yet.
+
+Next: the same open question as before (rag.md 7.9.4, section above) - a
+better vision model would help both this and the old ingest-time path,
+since the model is the shared variable now, not the architecture. The
+mechanism itself (image -> question -> chunk text -> existing pipeline) is
+considered done.

@@ -17,9 +17,14 @@ def make_block(
     section: list[str] | None = None,
     page: int = 1,
     block_type: BlockType = BlockType.PARAGRAPH,
+    image_path: str | None = None,
 ) -> DocumentBlock:
     return DocumentBlock(
-        text=text, block_type=block_type, section_path=section or ["Introduction"], page=page
+        text=text,
+        block_type=block_type,
+        section_path=section or ["Introduction"],
+        page=page,
+        image_path=image_path,
     )
 
 
@@ -39,6 +44,7 @@ def make_chunk(
     index: int = 0,
     section: str | None = "Results",
     section_path: list[str] | None = None,
+    image_paths: list[str] | None = None,
 ) -> Chunk:
     document_id = document_id_for("test:chunk")
     default_path = [section] if section else []
@@ -55,5 +61,6 @@ def make_chunk(
             section=section,
             section_path=section_path if section_path is not None else default_path,
             page=index + 1,
+            image_paths=image_paths or [],
         ),
     )

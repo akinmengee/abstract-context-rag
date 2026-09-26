@@ -38,7 +38,9 @@ def main(
     json_out: Path = typer.Option(None, "--json", help="Also write the report as JSON"),
 ) -> None:
     setup_logging()
-    resolver = SourceResolver(get_settings().ingestion)
+    settings = get_settings()
+    figures_dir = settings.ingestion.resolved_storage_dir() / "figures"
+    resolver = SourceResolver(settings.ingestion, settings.llm.base_url, figures_dir)
     document = resolver.resolve(
         SourceInput(
             arxiv_id=arxiv,

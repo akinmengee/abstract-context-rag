@@ -21,7 +21,8 @@ instead of guessing.
 Implemented today:
 
 - Section-aware PDF parsing (Docling layout analysis), arXiv fetching by ID, and
-  Wikipedia ingestion — all through source adapters behind one `ingest()` entry point
+  Wikipedia ingestion — all through source adapters behind one `ingest()` entry point,
+  measured end to end on real articles with their own golden set
 - Hybrid search (bge-m3 dense + sparse) fused with Reciprocal Rank Fusion
 - Cross-encoder reranking, plus a score threshold that abstains before the LLM is asked
 - Grounded generation with numbered citations and lost-in-the-middle context ordering
@@ -29,16 +30,22 @@ Implemented today:
 - Whole-document questions answered from a RAPTOR summary tree built at ingest (or
   map-reduce), with keyword query routing
 - Corrective and multi-hop retrieval agents (`agent.mode`) for questions that span papers
-- Evaluation harness: golden sets across six papers (specific, comparison,
-  multi-hop, abstain and whole-document questions), recall@k / MRR / evidence
-  recall / abstain accuracy, LLM-judged faithfulness and accuracy, time per
-  question, ablation tables
+- Evaluation harness: golden sets across six papers and two Wikipedia articles
+  (specific, comparison, multi-hop, abstain and whole-document questions),
+  recall@k / MRR / evidence recall / abstain accuracy, LLM-judged faithfulness
+  and accuracy, time per question, ablation tables
 - FastAPI backend with SSE streaming, an `abstractrag` CLI, and a Gradio dev console
 
 Results and measured trade-offs for each phase: [docs/roadmap.md](docs/roadmap.md).
 
 Planned:
 
+- Figure understanding: instead of one fixed caption per figure written at
+  ingest time, a retrieved figure is described with the user's actual
+  question, at answer time (`ingestion.figures` + `vision`, both off by
+  default) - live-tested to produce genuinely different, question-specific
+  answers, though the vision model (`granite3.2-vision:2b`) still sometimes
+  hallucinates, same as it does at ingest time
 - Query rewriting beyond the agent's retry, HyDE
 - Fine-tuned embedding and reranker models
 - React and Flutter clients
