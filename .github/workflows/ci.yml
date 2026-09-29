@@ -34,3 +34,47 @@ jobs:
 
       - name: Test
         run: uv run pytest -q
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Type-check and build
+        run: npm run build
+
+  mobile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.44.8"
+          channel: stable
+
+      - name: Install
+        run: flutter pub get
+
+      # android/, windows/, ios/ are `flutter create` boilerplate and not
+      # committed (see mobile/README.md) - analyze covers the Dart source
+      # without needing a platform scaffold or an Android/Windows SDK.
+      - name: Analyze
+        run: flutter analyze

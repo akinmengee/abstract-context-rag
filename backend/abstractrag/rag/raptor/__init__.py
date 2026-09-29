@@ -1,4 +1,4 @@
-"""RAPTOR: a summary tree over each document, built once at indexing time (roadmap phase 5).
+"""RAPTOR: a summary tree over each document, built once at indexing time.
 
   clustering.py  groups embeddings into clusters of about cluster_size (no LLM)
   tree.py        summarises each cluster, re-embeds the summaries, repeats up the tree

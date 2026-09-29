@@ -10,9 +10,9 @@ llm:
   # 127.0.0.1, not localhost: Ollama binds IPv4 only, and Windows can resolve
   # "localhost" to the IPv6 loopback (::1) first, which nothing is listening on.
   base_url: "http://127.0.0.1:11434/v1"
-  # Qwen3-4B-Instruct-2507 from models/, with its own (non-thinking) template
-  # and num_ctx baked in. Create it once with
-  #   ollama create qwen3:4b-instruct-8k -f backend/ollama/qwen3-4b-instruct-8k.Modelfile
+  # Qwen3-4B-Instruct-2507 from llm/models/, with its own (non-thinking)
+  # template and num_ctx baked in. Create it once with
+  #   ollama create qwen3:4b-instruct-8k -f llm/models/qwen3-4b-instruct-8k.Modelfile
   # Not `ollama pull qwen3:4b`: that tag is the thinking-only 2507 model, which
   # no request flag switches off (measured ~3000 reasoning tokens, ~57s, for a
   # one-word reply; the instruct model answers the same prompt in 0.5s).
@@ -143,3 +143,18 @@ vision:
   enabled: false
   model: "granite3.2-vision:2b"
   timeout_seconds: 60.0
+
+database:
+  # SQLite file for user accounts and chat history - separate from Qdrant
+  # (document chunks/embeddings) and from ingestion.storage_dir (raw source
+  # files). One file, no server process, good enough for local single-user use.
+  path: "data/app.db"
+
+auth:
+  # Dev-only default. Override with the ACR_AUTH__SECRET_KEY env var before
+  # this ever leaves your machine - anyone holding this key can mint a valid
+  # token for any user id. Left as a default (not a hard-required field) so
+  # Settings() still constructs the way every existing test expects.
+  secret_key: "dev-secret-change-me-before-you-deploy-this"
+  algorithm: "HS256"
+  access_token_expire_minutes: 43200 # 30 days - see AuthSettings comment

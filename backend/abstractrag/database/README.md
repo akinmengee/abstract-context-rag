@@ -34,11 +34,17 @@ per-document filtered search fast.
 
 ## API surface
 
-`ensure_collection()`, `upsert_chunks()`, `delete_document()`, `search_dense()`,
-`search_sparse()`, `list_documents()`. `RagEngine.ingest()` calls
-`delete_document()` before `upsert_chunks()` on every ingest, so re-ingesting the
-same source replaces it instead of duplicating it (chunk IDs are stable — see
+`ensure_collection()`, `upsert_chunks()`, `delete_document()`, `delete_tree()`,
+`get_chunks()`, `list_chunks()`, `search_dense()`, `search_sparse()`,
+`list_documents()`. `RagEngine.ingest()` calls `delete_document()` before
+`upsert_chunks()` on every ingest, so re-ingesting the same source replaces it
+instead of duplicating it (chunk IDs are stable — see
 `rag/models.py::chunk_id_for` — but re-chunking can change the count).
+`delete_tree()` and `list_chunks(level=...)` are RAPTOR's summary-tree
+operations (level 0 is the document's own leaves, so `list_chunks` doubles as
+the plain "every chunk of this document" call); `get_chunks()` resolves a
+cited tree node back to the source leaves it summarizes, for verification
+(`rag/engine.py::_source_passages`).
 
 ## Testing
 

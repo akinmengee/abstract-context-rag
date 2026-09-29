@@ -116,7 +116,12 @@ class RagEngine:
             self.store.upsert_chunks([node for node, _ in built], [e for _, e in built])
         return len(built)
 
-    def ask(self, question: str, document_id: str | None = None) -> Answer:
+    def ask(
+        self,
+        question: str,
+        document_id: str | None = None,
+        history: list[dict[str, str]] | None = None,
+    ) -> Answer:
         """Route a question to retrieval or map-reduce summarisation.
 
         A specific question is answered from the top-k; a global one
@@ -125,6 +130,10 @@ class RagEngine:
         to, so a global-sounding question with no document_id still falls
         through to answer() rather than guessing which document to summarise.
 
+        `history` is recent prior turns of the same conversation (rag.md 12) -
+        never passed to summarize(), a whole-document operation with no
+        conversational framing.
+
         This is what `/api/v1/chat` and `abstractrag ask` call by default.
         Callers that want one specific path regardless of phrasing use
         answer() or summarize() directly - `/api/v1/summarize` and
@@ -132,21 +141,30 @@ class RagEngine:
         """
         if document_id and is_global_question(question):
             return self.summarize(question, document_id)
-        return self.answer(question, document_id)
+        return self.answer(question, document_id, history)
 
-    def answer(self, question: str, document_id: str | None = None) -> Answer:
+    def answer(
+        self,
+        question: str,
+        document_id: str | None = None,
+        history: list[dict[str, str]] | None = None,
+    ) -> Answer:
         selection = self._select_context(question, document_id)
         if not selection.sufficient:
-            return _abstain(selection.chunks, selection.steps)
+            return self._try_summary_fallback(question, document_id) or _abstain(
+                selection.chunks, selection.steps
+            )
 
         self._free_gpu_for_llm()
         context_chunks = self._augment_figures(question, selection.chunks)
         # used_chunks keeps rank order (clearer for the debug UI); the LLM gets the
         # lost-in-the-middle order instead, and citation markers follow that order.
         context, citations = prompts.build_context(prompts.order_for_context(context_chunks))
-        text = self.llm.complete(prompts.build_messages(question, context))
+        text = self.llm.complete(prompts.build_messages(question, context, history))
         if prompts.ABSTAIN_SENTINEL in text:
-            return _abstain(context_chunks, selection.steps)
+            return self._try_summary_fallback(question, document_id) or _abstain(
+                context_chunks, selection.steps
+            )
 
         return Answer(
             text=text,
@@ -157,10 +175,17 @@ class RagEngine:
         )
 
     def stream_answer(
-        self, question: str, document_id: str | None = None
+        self,
+        question: str,
+        document_id: str | None = None,
+        history: list[dict[str, str]] | None = None,
     ) -> Iterator[AnswerEvent]:
         selection = self._select_context(question, document_id)
         if not selection.sufficient:
+            fallback = self._try_summary_fallback(question, document_id)
+            if fallback is not None:
+                yield from answer_as_events(fallback)
+                return
             yield AnswerEvent(event="done", answer=_abstain(selection.chunks, selection.steps))
             return
 
@@ -173,12 +198,22 @@ class RagEngine:
         # Hold back the first tokens: the model signals "no answer here" with a
         # sentinel, and streaming half of it before noticing would look like an answer.
         held = True
-        for token in self.llm.stream(prompts.build_messages(question, context)):
+        for token in self.llm.stream(prompts.build_messages(question, context, history)):
             collected += token
             if held:
                 if len(collected) < len(prompts.ABSTAIN_SENTINEL):
                     continue
                 if prompts.ABSTAIN_SENTINEL in collected:
+                    # Nothing has reached the client yet (still held), so a
+                    # fallback can still swap in a whole different answer
+                    # cleanly - unlike the same check after the loop below,
+                    # where token events may already be showing.
+                    fallback = self._try_summary_fallback(question, document_id)
+                    if fallback is not None:
+                        yield from answer_as_events(
+                            fallback, include_citations=False
+                        )
+                        return
                     yield AnswerEvent(
                         event="done", answer=_abstain(context_chunks, selection.steps)
                     )
@@ -189,6 +224,10 @@ class RagEngine:
             yield AnswerEvent(event="token", token=token)
 
         if prompts.ABSTAIN_SENTINEL in collected:
+            # No fallback here (unlike the same check above, still inside
+            # `held`): token events for this answer have already reached the
+            # client, so swapping in a whole different one now would just
+            # append a second, unrelated answer after visible wrong content.
             yield AnswerEvent(event="done", answer=_abstain(context_chunks, selection.steps))
             return
 
@@ -237,6 +276,28 @@ class RagEngine:
             section_summaries=summaries,
             verified_claims=self._verify_summary(text, summaries, chunks),
         )
+
+    def _try_summary_fallback(self, question: str, document_id: str | None) -> Answer | None:
+        """A safety net for a global question the keyword router missed.
+
+        is_global_question() is a fixed list of English trigger words on
+        purpose (rag.md 7.4.1) - cheap, but never exhaustive. Measured live:
+        "what is this research about" fell through to plain retrieval for a
+        Wikipedia article, because "research" wasn't a recognised document
+        word - retrieval abstained, when summarize() would have answered it.
+        Rather than only ever closing this gap by chasing more synonyms,
+        retrying here catches whatever the router still misses, whenever
+        retrieval itself gives up - at the cost of a slower genuine abstain,
+        which now pays for this attempt too before giving up for real.
+
+        Returns None (never a fallback answer) when there's no single
+        document to scope to, or when summarize() itself abstains too - the
+        caller falls back to its own abstain in either case.
+        """
+        if document_id is None:
+            return None
+        fallback = self.summarize(question, document_id)
+        return None if fallback.abstained else fallback
 
     def _tree_summaries(self, document_id: str) -> list[SectionSummary]:
         """The level-1 tree nodes as numbered section summaries.
@@ -404,3 +465,25 @@ def _used_citations(text: str, citations: list[Citation]) -> list[Citation]:
     """Only return sources the answer actually pointed at."""
     markers = {int(marker) for marker in prompts.CITATION_MARKER.findall(text)}
     return [citation for citation in citations if citation.marker in markers]
+
+
+def answer_as_events(
+    answer: Answer, include_citations: bool = True
+) -> Iterator[AnswerEvent]:
+    """Turn an already-computed Answer into the same event shape
+    stream_answer() produces token-by-token: summarize() (used directly by
+    api/chat.py for a router-detected global question, and by
+    RagEngine._try_summary_fallback() when retrieval itself gives up) has no
+    incremental tokens to stream - the whole computation finishes before
+    there's any text at all - so the answer goes out as one `token` event
+    instead of many.
+
+    `include_citations=False` when a `citations` event for this turn has
+    already been sent (RagEngine.stream_answer()'s mid-stream fallback case)
+    - the contract is one `citations` event per turn, not per answer tried.
+    """
+    if include_citations:
+        yield AnswerEvent(event="citations", citations=answer.citations)
+    if not answer.abstained:
+        yield AnswerEvent(event="token", token=answer.text)
+    yield AnswerEvent(event="done", answer=answer)

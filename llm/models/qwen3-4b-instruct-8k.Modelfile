@@ -8,8 +8,8 @@
 # - num_ctx is baked in: Ollama's /v1 endpoint ignores a per-request num_ctx and
 #   cuts longer prompts to 4096 without an error (measured: 6965 -> 4096 tokens).
 #
-#   ollama create qwen3:4b-instruct-8k -f backend/ollama/qwen3-4b-instruct-8k.Modelfile
-FROM ../../models/Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf
+#   ollama create qwen3:4b-instruct-8k -f models/qwen3-4b-instruct-8k.Modelfile
+FROM ./Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf
 
 TEMPLATE """{{- $lastUserIdx := -1 -}}
 {{- range $idx, $msg := .Messages -}}

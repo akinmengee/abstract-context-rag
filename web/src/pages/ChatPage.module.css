@@ -1,0 +1,12 @@
+.layout {
+  height: 100%;
+  display: flex;
+}
+
+.emptyState {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}

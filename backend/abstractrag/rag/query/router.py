@@ -18,7 +18,13 @@ import re
 # this paper" global while "summary statistic" (Table 3) stays specific.
 # "high-level overview", "tl;dr" etc. need no anchor: they are inherently
 # about the whole thing being discussed, not one detail of it.
-_DOC = r"(?:this|the) (?:paper|document|article|study)"
+#
+# Covers both source types this project actually ingests (papers, Wikipedia
+# articles) plus generic ways of referring to either - "research" and
+# "source" in particular were measured missing live: "what is this research
+# about" fell through to plain retrieval instead of summarize() for a
+# Wikipedia article, which isn't a paper and so never said "paper"/"document".
+_DOC = r"(?:this|the) (?:paper|document|article|study|research|source|text|content)"
 _SUMMARIZE = r"summar(?:y|ies|ize[sd]?|ise[sd]?|izing|ising)"
 
 # The gap between a trigger word and the document reference must not cross a

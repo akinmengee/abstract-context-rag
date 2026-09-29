@@ -73,7 +73,7 @@ class RaptorSettings(BaseModel):
 
 
 class AgentSettings(BaseModel):
-    # off: one retrieval pass, as in phases 1-3. corrective: an LLM grades the
+    # off: a single retrieval pass, no agent. corrective: an LLM grades the
     # retrieved chunks and rewrites the query when none answer it. multi_hop:
     # corrective, plus follow-up searches for what the first pass was missing.
     mode: str = Field(default="off", pattern="^(off|corrective|multi_hop)$")
@@ -150,6 +150,25 @@ class VisionSettings(BaseModel):
     timeout_seconds: float = 60.0
 
 
+class DatabaseSettings(BaseModel):
+    path: str = "data/app.db"
+
+    def resolved_path(self) -> Path:
+        """Absolute SQLite file path; relative values are anchored at the repo root."""
+        path = Path(self.path)
+        return path if path.is_absolute() else PROJECT_ROOT / path
+
+
+class AuthSettings(BaseModel):
+    # 32+ chars: PyJWT warns below that for HS256. Still just a dev default.
+    secret_key: str = "dev-secret-change-me-before-you-deploy-this"
+    algorithm: str = "HS256"
+    # Long-lived on purpose: this is realistically single-user local use
+    # (rag.md frames the project as LAN-only, not internet-exposed), so a
+    # refresh-token flow would be pure ceremony.
+    access_token_expire_minutes: int = 60 * 24 * 30  # 30 days
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="ACR_",
@@ -170,6 +189,8 @@ class Settings(BaseSettings):
     retrieval: RetrievalSettings = RetrievalSettings()
     ingestion: IngestionSettings = IngestionSettings()
     vision: VisionSettings = VisionSettings()
+    database: DatabaseSettings = DatabaseSettings()
+    auth: AuthSettings = AuthSettings()
 
     @classmethod
     def settings_customise_sources(

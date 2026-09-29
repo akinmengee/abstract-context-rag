@@ -40,13 +40,22 @@ class MultiHopAgent:
         first = self.corrective.select(question, document_id, search, release_gpu)
         steps: list[AgentStep] = list(first.steps)
         pool: list[RetrievedChunk] = list(first.chunks) if first.sufficient else []
+        # Every hop's retrieved chunks, kept or not - what the planner reasons
+        # from, kept separate from `pool` (only ever cited chunks). A chunk a
+        # hop's grader rejected still failed only *that hop's* question; it
+        # can still name the bridge entity the next search needs (measured:
+        # a compound question's own search ranks the bridge passage below
+        # its cutoff even when the passage is right there in `first.chunks` -
+        # discarding it left the planner reasoning from nothing, "(none
+        # yet)", instead of from what the index actually returned).
+        seen: list[RetrievedChunk] = list(first.chunks)
         searches = [step.query for step in steps]
 
         planned = 0
         while len(searches) < self.settings.max_searches:
             release_gpu()
             messages = prompts.build_plan_messages(
-                question, pool, searches, allow_done=planned > 0
+                question, seen, searches, allow_done=planned > 0
             )
             planned += 1
             query = prompts.parse_plan(self.llm.complete(messages))
@@ -59,6 +68,7 @@ class MultiHopAgent:
             hop = self.corrective.select(query, document_id, search, release_gpu)
             steps.extend(hop.steps)
             searches.extend(step.query for step in hop.steps)
+            seen = _merge(seen, hop.chunks, self.settings.max_context_chunks)
             if hop.sufficient:
                 pool = _merge(pool, hop.chunks, self.settings.max_context_chunks)
 

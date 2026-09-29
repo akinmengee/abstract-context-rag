@@ -79,8 +79,17 @@ def build_context(chunks: list[RetrievedChunk]) -> tuple[str, list[Citation]]:
     return "\n\n".join(blocks), citations
 
 
-def build_messages(question: str, context: str) -> list[dict[str, str]]:
+def build_messages(
+    question: str, context: str, history: list[dict[str, str]] | None = None
+) -> list[dict[str, str]]:
+    """`history` is prior turns of this conversation, oldest first, spliced in
+    as their own raw messages - not wrapped in the Context:/Question: template,
+    since only the current turn has fresh retrieved context. A prior answer's
+    [n] markers refer to that turn's own context blocks; the model is never
+    asked to reconcile them across turns (rag.md 12 - lightweight only, no
+    re-retrieval or query rewriting)."""
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
+        *(history or []),
         {"role": "user", "content": USER_TEMPLATE.format(context=context, question=question)},
     ]

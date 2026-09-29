@@ -136,7 +136,8 @@ class EvaluationReport(BaseModel):
     k: int
 
     total_questions: int
-    # Over single questions, so these stay comparable with the phase 2 table.
+    # Over single questions, so these stay comparable with the retrieval-mode
+    # ablation table (docs/roadmap.md).
     recall_at_k: float
     mrr: float
     abstain_accuracy: float

@@ -56,7 +56,9 @@ class CrossEncoderReranker:
 
     def unload(self) -> None:
         """Drop the model so the LLM has the GPU to itself. Reloads lazily
-        (~5-7s) on next use - only worth calling right before an LLM call."""
-        if self._model is not None:
+        (~5-7s) on next use - only worth calling right before an LLM call.
+
+        A no-op on CPU - see BgeM3Embedder.unload()'s docstring for why."""
+        if self._model is not None and self.settings.device != "cpu":
             self._model = None
             release_cuda_memory()

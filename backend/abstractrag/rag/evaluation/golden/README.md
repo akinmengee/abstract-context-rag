@@ -4,7 +4,8 @@ Questions whose correct behaviour is known in advance. Internal test data - the
 product never generates questions, it only answers them.
 
 `abstractrag eval` runs every file here by default; `--golden <file>` (repeatable)
-runs a subset. The phase 2 ablation table was measured on `rag_paper.json` alone.
+runs a subset. The retrieval-mode ablation table (`docs/roadmap.md`) was
+measured on `rag_paper.json` alone.
 
 Each entry:
 

@@ -32,9 +32,10 @@ class DocumentSummary(BaseModel):
 
 
 class ChatRequest(BaseModel):
+    conversation_id: str
     question: str = Field(min_length=1, examples=["What datasets does the paper evaluate on?"])
-    # Optional: scope the answer to one document instead of the whole collection.
-    document_id: str | None = None
+    # document_id is not part of this request: it comes from the
+    # conversation itself (Conversation.document_id, fixed at creation).
 
 
 class SummarizeRequest(BaseModel):

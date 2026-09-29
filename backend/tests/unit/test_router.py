@@ -21,6 +21,12 @@ GLOBAL_QUESTIONS = [
     "In a nutshell, what does this paper say?",
     "What's the gist of this paper?",
     "Give me a high-level overview.",
+    # Measured live (2026-09-27): a Wikipedia article isn't a "paper", so a
+    # question using its own vocabulary needs to route the same way.
+    "What is this research about?",
+    "What is this source about?",
+    "Summarize this text.",
+    "What does this content cover?",
 ]
 
 SPECIFIC_QUESTIONS = [
@@ -45,6 +51,9 @@ SPECIFIC_QUESTIONS = [
     # so a nearby table/figure reference is what has to catch this instead.
     "What key finding does Table 3 report about retrieval accuracy?",
     "What is the main result shown in Table 1?",
+    # The new _DOC synonyms shouldn't fire on unrelated uses of the same words.
+    "What research methods does this paper use?",
+    "Where does this text mention the learning rate?",
 ]
 
 

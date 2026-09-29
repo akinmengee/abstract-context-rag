@@ -20,6 +20,10 @@ dependencies = [
     "arxiv>=2.1",
     "numpy>=2.0",
     "scikit-learn>=1.5",
+    "sqlmodel>=0.0.22",
+    "bcrypt>=4.1",
+    "pyjwt>=2.9",
+    "email-validator>=2.2",
 ]
 
 [project.optional-dependencies]

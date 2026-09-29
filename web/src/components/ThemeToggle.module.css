@@ -1,0 +1,21 @@
+.toggle {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 200;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
+.toggle:hover {
+  background: var(--bg-hover);
+}

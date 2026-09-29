@@ -185,35 +185,40 @@ mechanism behind "re-ingesting replaces instead of duplicates."
 
 ## Every module
 
-| Path | Role | Status |
-|---|---|---|
-| `engine.py` | `RagEngine` — the only entry point (`ingest`, `ask`, `answer`, `stream_answer`, `summarize`, `health`) | ✅ |
-| `models.py` | Shared types: `ParsedDocument`, `Chunk`, `RetrievedChunk`, `Answer`, `Citation`... | ✅ |
-| `ingestion/base.py` | `SourceInput` — enforces "exactly one source" | ✅ |
-| `ingestion/resolver.py` | Picks fetcher + adapter for a `SourceInput`, returns a `ParsedDocument` | ✅ |
-| `ingestion/fetchers/arxiv.py` | arXiv ID → downloaded PDF, via the official `arxiv` package | ✅ |
-| `ingestion/fetchers/wikipedia.py` | Title/URL → clean article text, via the Wikipedia REST API | ✅ |
-| `ingestion/sources/pdf_source.py` | PDF → `ParsedDocument`, via Docling layout analysis | ✅ |
-| `ingestion/sources/wikipedia_source.py` | Wikipedia text → `ParsedDocument`, via heading parsing | ✅ |
-| `chunking/section_aware.py` | `ParsedDocument` → `Chunk[]`, section-bounded with overlap | ✅ |
-| `embedding/bge_m3.py` | Text → dense + sparse vectors (bge-m3) | ✅ |
-| `retrieval/hybrid.py` | Query → candidate `RetrievedChunk[]` (dense / sparse / hybrid) | ✅ |
-| `retrieval/rrf.py` | Reciprocal Rank Fusion — merges two rankings into one | ✅ |
-| `reranking/cross_encoder.py` | Candidates → top-N, scored by a cross-encoder | ✅ |
-| `generation/prompts.py` | System prompt, context ordering, citation numbering | ✅ |
-| `generation/llm_client.py` | Thin HTTP client for an OpenAI-compatible API (Ollama); warns when a prompt fills the context window | ✅ |
-| `query/` | Keyword-based routing between retrieval and map-reduce built; rewriting, multi-query, HyDE, step-back, decomposition still to come | 🚧 phase 3 |
-| `verification/` | Sentence-level claim decomposition + one batched LLM-judge call per answer; flags unsupported and uncited claims | 🚧 phase 3 |
-| `summarization/` | Map-reduce, and `summarization.method: raptor` - reduce the document's RAPTOR tree instead of mapping every section | ✅ phase 3 / 5 |
-| `raptor/` | RAPTOR summary tree per document: clustering (no LLM) and bottom-up tree building; nodes stored as chunks with a `level`, hidden from retrieval by default | ✅ phase 5 |
-| `agents/` | Corrective (LLM-graded retrieval, rewrite and retry) and multi-hop (self-ask follow-up searches) context selection, `agent.mode` | ✅ phase 4 |
-| `evaluation/` | Multi-paper golden sets (single / comparison / multi-hop / abstain), self-implemented metrics (recall@k, MRR, evidence recall, abstain accuracy), LLM-judged faithfulness and accuracy, per-kind reports | ✅ phase 1-4 |
+| Path | Role |
+|---|---|
+| `engine.py` | `RagEngine` — the only entry point (`ingest`, `ask`, `answer`, `stream_answer`, `summarize`, `health`) |
+| `models.py` | Shared types: `ParsedDocument`, `Chunk`, `RetrievedChunk`, `Answer`, `Citation`... |
+| `gpu.py` | `release_cuda_memory()` — drops a model's VRAM so the embedder/reranker/LLM can share one 6 GB card, one at a time (`engine.py`'s `_free_gpu_for_llm`) |
+| `ingestion/base.py` | `SourceInput` — enforces "exactly one source" |
+| `ingestion/resolver.py` | Picks fetcher + adapter for a `SourceInput`, returns a `ParsedDocument` |
+| `ingestion/fetchers/arxiv.py` | arXiv ID → downloaded PDF, via the official `arxiv` package |
+| `ingestion/fetchers/wikipedia.py` | Title/URL → clean article text, via the Wikipedia REST API |
+| `ingestion/sources/pdf_source.py` | PDF → `ParsedDocument`, via Docling layout analysis |
+| `ingestion/sources/wikipedia_source.py` | Wikipedia text → `ParsedDocument`, via heading parsing |
+| `chunking/section_aware.py` | `ParsedDocument` → `Chunk[]`, section-bounded with overlap |
+| `embedding/bge_m3.py` | Text → dense + sparse vectors (bge-m3) |
+| `retrieval/hybrid.py` | Query → candidate `RetrievedChunk[]` (dense / sparse / hybrid) |
+| `retrieval/rrf.py` | Reciprocal Rank Fusion — merges two rankings into one |
+| `reranking/cross_encoder.py` | Candidates → top-N, scored by a cross-encoder |
+| `generation/prompts.py` | System prompt, context ordering, citation numbering |
+| `generation/llm_client.py` | Thin HTTP client for an OpenAI-compatible API (Ollama); warns when a prompt fills the context window |
+| `generation/vision.py` | Question-conditioned figure descriptions - asks the vision model the user's actual question, at answer time, instead of one fixed caption written at ingest. Off by default (`vision`/`ingestion.figures` in `config.yaml`) |
+| `query/router.py` | Keyword routing between retrieval and map-reduce/RAPTOR summarization - a fixed English trigger-phrase match, not an LLM call |
+| `verification/` | Sentence-level claim decomposition + one batched LLM-judge call per answer; flags unsupported and uncited claims |
+| `summarization/` | Map-reduce, and `summarization.method: raptor` - reduce the document's RAPTOR tree instead of mapping every section |
+| `raptor/` | RAPTOR summary tree per document: clustering (no LLM) and bottom-up tree building; nodes stored as chunks with a `level`, hidden from retrieval by default |
+| `agents/` | Corrective (LLM-graded retrieval, rewrite and retry) and multi-hop (self-ask follow-up searches) context selection, `agent.mode` |
+| `evaluation/` | Multi-paper golden sets (single / comparison / multi-hop / abstain), self-implemented metrics (recall@k, MRR, evidence recall, abstain accuracy), LLM-judged faithfulness and accuracy, per-kind reports |
 
-`summarization/`, `verification/` and `evaluation/` are built and covered by
-tests. Each remaining `⬜` package already exists with a docstring in its
-`__init__.py` explaining what will live there and which roadmap phase it
-belongs to — see `docs/roadmap.md` for the phase order. Nothing here is a stub
-that silently does nothing; if it's not built yet, the folder says so.
+Every module above is built and covered by tests - nothing in `rag/` is a
+stub. One thing deliberately *not* built: a general query-rewriting layer
+under `query/` (multi-query, HyDE, step-back, decomposition). The one case
+that actually needed it - the multi-hop agent's follow-up search failing to
+find an unstated bridge fact - got a narrower, purpose-built version
+directly in `agents/multi_hop.py` instead of a general layer here
+(`docs/roadmap.md` has the full build history and what was measured at each
+step, if that level of detail is ever needed).
 
 ## Design rules
 

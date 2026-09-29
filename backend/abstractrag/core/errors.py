@@ -23,3 +23,19 @@ class InvalidInputError(RagError):
 
 class LLMError(RagError):
     """The llama.cpp server is unreachable or returned an unusable response."""
+
+
+class InvalidCredentialsError(RagError):
+    """Wrong email/password, or a missing/malformed/invalid bearer token."""
+
+
+class TokenExpiredError(RagError):
+    """The access token's exp claim has passed."""
+
+
+class EmailAlreadyRegisteredError(RagError):
+    """Registration was attempted with an email that already has an account."""
+
+
+class ConversationNotFoundError(RagError):
+    """No such conversation, or it doesn't belong to the caller (same 404 either way)."""

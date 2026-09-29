@@ -4,29 +4,46 @@ The API is a thin shell: it validates input, calls the engine, and maps domain
 errors to status codes. No RAG logic lives here.
 """
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from abstractrag import __version__
 from abstractrag.api.router import router as api_router
+from abstractrag.core.db import init_db
 from abstractrag.core.errors import (
+    ConversationNotFoundError,
+    EmailAlreadyRegisteredError,
     FetchError,
+    InvalidCredentialsError,
     InvalidInputError,
     LLMError,
     ParseError,
     RagError,
     SourceNotFoundError,
+    TokenExpiredError,
 )
 from abstractrag.core.logging import setup_logging
 
 _STATUS_BY_ERROR: list[tuple[type[RagError], int]] = [
     (InvalidInputError, 400),
     (SourceNotFoundError, 404),
+    (ConversationNotFoundError, 404),
     (ParseError, 422),
+    (EmailAlreadyRegisteredError, 409),
+    (InvalidCredentialsError, 401),
+    (TokenExpiredError, 401),
     (FetchError, 502),
     (LLMError, 503),
 ]
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    init_db()
+    yield
 
 
 def create_app() -> FastAPI:
@@ -35,6 +52,7 @@ def create_app() -> FastAPI:
         title="abstract-context-rag",
         version=__version__,
         description="Local RAG engine for grounded Q&A over research papers and Wikipedia.",
+        lifespan=lifespan,
     )
 
     # The React dev server and the phone on the same LAN call this API directly.

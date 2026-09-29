@@ -224,6 +224,21 @@ class TestMultiHopAgent:
 
         assert "RAG uses DPR" in llm.prompts[1]
 
+    def test_the_planner_sees_a_rejected_first_search_not_a_blank_slate(self):
+        # rag.md's diagnosed bug: a passage graded "does not answer the
+        # compound question" was discarded entirely, leaving the planner
+        # reasoning from "(none yet)" even when the bridge fact ("RAG uses
+        # DPR") was sitting right there in what the first search retrieved.
+        search = FakeSearch(
+            {"q": [chunk("RAG uses DPR", 0)], "DPR training": [chunk("in-batch negatives", 1)]}
+        )
+        llm = ScriptedLlm(["NONE", "SEARCH: DPR training", "1", "DONE"])
+
+        selection = self.agent(llm, max_rewrites=0).select("q", None, search, GpuSpy())
+
+        assert "RAG uses DPR" in llm.prompts[1]
+        assert [c.chunk.text for c in selection.chunks] == ["in-batch negatives"]
+
     def test_stops_at_the_search_budget(self):
         search = FakeSearch({"q": [chunk("a", 0)], "s2": [chunk("b", 1)]})
         llm = ScriptedLlm(["1", "SEARCH: s2", "1"])

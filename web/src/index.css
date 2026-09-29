@@ -1,0 +1,118 @@
+/* Abstract Context RAG - design tokens.
+   The product's whole point is that every answer traces back to a real
+   passage, so citations get their own color (evidence, warm) distinct from
+   the brand's own chrome (steel blue) - not folded into one accent used for
+   everything. Surfaces stay neutral so both colors keep their meaning. */
+:root {
+  --paper: #f6f7f5;
+  --bg: var(--paper);
+  --bg-elevated: #ffffff;
+  --bg-sidebar: #eef1f0;
+  --bg-hover: #e2e7e4;
+  --text: #14202e;
+  --text-muted: #5c6b70;
+  --border: #dce2de;
+  --accent: #3d6ea5;
+  --accent-text: #ffffff;
+  --evidence: #a3762f;
+  --evidence-bg: #f3e6cf;
+  --danger: #b23a52;
+
+  --font-display: "Newsreader", "Iowan Old Style", Georgia, serif;
+  --font-body:
+    "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14171c;
+    --bg-elevated: #1c2028;
+    --bg-sidebar: #0f1216;
+    --bg-hover: #262b33;
+    --text: #edf1f6;
+    --text-muted: #8b93a0;
+    --border: #272d36;
+    --accent: #5b8fcb;
+    --accent-text: #ffffff;
+    --evidence: #d9a85c;
+    --evidence-bg: #3a2f1c;
+    --danger: #dd6a80;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #14171c;
+  --bg-elevated: #1c2028;
+  --bg-sidebar: #0f1216;
+  --bg-hover: #262b33;
+  --text: #edf1f6;
+  --text-muted: #8b93a0;
+  --border: #272d36;
+  --accent: #5b8fcb;
+  --accent-text: #ffffff;
+  --evidence: #d9a85c;
+  --evidence-bg: #3a2f1c;
+  --danger: #dd6a80;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+button,
+input,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+a {
+  color: var(--accent);
+}
+
+/* A citation marker: the signature element. Warm and pill-shaped on
+   purpose, so a claim's evidence reads as a small stamp of provenance
+   rather than disappearing as plain bracketed text. */
+.citationMark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.1rem;
+  height: 1.1rem;
+  padding: 0 0.3rem;
+  margin-left: 0.15rem;
+  border-radius: 999px;
+  background: var(--evidence-bg);
+  color: var(--evidence);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 500;
+  vertical-align: 0.15em;
+}

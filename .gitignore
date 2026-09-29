@@ -225,23 +225,30 @@ rag.md
 
 # Large or generated data, kept out of the repo
 data/
-models/
+llm/models/
 *.gguf
 
-# Flutter keeps source in mobile/lib, so undo the generic lib/ rule above
+# Flutter keeps source in mobile/lib, so undo the generic lib/ rule above.
+# Platform folders (android/, windows/, ios/ if it's ever added) are
+# `flutter create`-generated boilerplate, not source - regenerated locally
+# with `flutter create --platforms=windows,android .` from mobile/, same as
+# mobile/README.md already documents for android/ and ios/.
 !mobile/lib/
 mobile/.dart_tool/
 mobile/build/
 mobile/.flutter-plugins*
+mobile/android/
+mobile/windows/
+mobile/ios/
+mobile/.idea/
+mobile/*.iml
 *.iml
 
 # Node / web
 node_modules/
 web/dist/
 .vite/
-
-# Generated API clients
-shared/generated/
+*.tsbuildinfo
 
 # Subagent-driven-development scratch space (ledgers, briefs, review packages)
 .superpowers/

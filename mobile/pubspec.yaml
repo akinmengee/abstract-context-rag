@@ -10,9 +10,31 @@ dependencies:
   flutter:
     sdk: flutter
   http: ^1.2.2
+  provider: ^6.1.2
+  shared_preferences: ^2.3.2
+  google_fonts: ^6.2.1
 
 dev_dependencies:
   flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.14.3
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/icon-color.png
+    - assets/icon-white.png
+
+# Run `dart run flutter_launcher_icons` after changing assets/app_icon*.png -
+# it writes straight into android/ and windows/runner/resources/, nothing to
+# wire up by hand. Source is the same brand badge as web/public/favicon.png.
+# adaptive_icon_foreground is a separately-padded crop (432x432, badge at 62%)
+# since Android's adaptive mask crops a plain full-bleed image.
+flutter_launcher_icons:
+  image_path: "assets/app_icon.png"
+  android: true
+  adaptive_icon_background: "#F7F6F9"
+  adaptive_icon_foreground: "assets/app_icon_foreground.png"
+  windows:
+    generate: true
+    image_path: "assets/app_icon.png"
+    icon_size: 256

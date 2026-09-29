@@ -1,4 +1,4 @@
-"""Agents that decide what context an answer is built from (roadmap phase 4).
+"""Agents that decide what context an answer is built from.
 
   base.py        ContextSelection, and the search/release tools the engine lends
   prompts.py     grade, rewrite and plan prompts, with parsers that can say "unreadable"

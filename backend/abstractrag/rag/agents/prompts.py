@@ -30,13 +30,18 @@ research papers. The first search for it found nothing useful.
 Reply with only the new search query: the key names and terms, no question words, \
 no explanation."""
 
-_SEARCH_ADVICE = """Check every link the question relies on. A question often names \
-something indirectly ("RAG's retriever", "the model this paper builds on"); the \
-passages only answer it if they also say what that thing is. If none of them \
-does, search for that, e.g. SEARCH: which retriever does RAG use
-When a passage names the method, model or paper the question depends on (for \
-example "our retriever is based on DPR"), search for that name directly.
-Each side of a comparison needs its own passages."""
+_SEARCH_ADVICE = """Check every link the question relies on before anything else. A \
+question often names something indirectly ("RAG's retriever", "the model this \
+paper builds on") - the passages only answer it if one of them also states what \
+that thing actually is.
+If none does, your search MUST identify it, e.g. SEARCH: which retriever does RAG \
+use - even if you already know the answer yourself. A fact you know is not a fact \
+these passages have stated yet, and the final answer can only cite what is in the \
+passages, so guessing the link and searching for its details instead skips the \
+step that would have grounded it.
+Once a passage does name it (e.g. "our retriever is based on DPR"), search for \
+that name's own details directly - the link only needs finding once.
+Each side of a comparison needs its own passages, not just one."""
 
 PLAN_SYSTEM = f"""You plan searches over a collection of research papers to answer \
 a question. You see the question and the passages found so far.
@@ -52,11 +57,10 @@ the missing piece>
 # "enough" even when a comparison has only one side or a link is unstated
 # (measured on qwen3 4B), and one extra search costs seconds, not a wrong answer.
 FOLLOW_UP_SYSTEM = f"""You plan searches over a collection of research papers to \
-answer a question. You see the question and the passages found so far.
+answer a question. You see the question and the passages found so far - the first \
+search for this question did not find enough.
 
-Reply with exactly one line: SEARCH: <search query for the piece of information \
-most likely still missing, or for a link the question relies on that the \
-passages do not state>
+Reply with exactly one line: SEARCH: <query>
 
 {_SEARCH_ADVICE}"""
 

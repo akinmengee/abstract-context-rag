@@ -1,0 +1,161 @@
+.toggle {
+  position: fixed;
+  top: 14px;
+  left: 14px;
+  z-index: 200;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
+.toggle:hover {
+  background: var(--bg-hover);
+}
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 14, 20, 0.4);
+  z-index: 140;
+}
+
+.sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 288px;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 1rem;
+  padding-top: 64px;
+  gap: 1rem;
+  z-index: 150;
+  transform: translateX(-100%);
+  transition: transform 0.22s ease;
+}
+
+.sidebar.open {
+  transform: translateX(0);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0 0.15rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+/* The circuit-brain mark as a CSS mask: its RGB is irrelevant, only its
+   alpha shape is used, painted with the current text color - so the same
+   file works on both themes without a separate light/dark asset. */
+.brandMark {
+  flex-shrink: 0;
+  width: 34px;
+  height: 30px;
+  background-color: var(--text);
+  -webkit-mask-image: url("/icon-white.png");
+  mask-image: url("/icon-white.png");
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+}
+
+.brandText {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+  font-family: var(--font-display);
+}
+
+.brandName {
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.brandAccent {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.newChat {
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  text-align: left;
+  font-weight: 500;
+}
+
+.newChat:hover {
+  background: var(--bg-hover);
+}
+
+.search {
+  padding: 0.5rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.search::placeholder {
+  color: var(--text-muted);
+}
+
+.label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0 0.25rem;
+}
+
+.empty {
+  padding: 0.5rem 0.25rem;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.footer {
+  border-top: 1px solid var(--border);
+  padding-top: 0.6rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.logout {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  text-decoration: underline;
+  padding: 0;
+}

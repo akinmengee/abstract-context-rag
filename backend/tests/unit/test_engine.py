@@ -416,7 +416,9 @@ class TestSummarize:
             )
         ]
         engine = build_engine(
-            [], [], "unused",
+            [],
+            [],
+            "unused",
             store=FakeStore(chunks),
             summarizer=FakeSummarizer("Final answer [1].", summaries),
         )
@@ -451,7 +453,9 @@ class TestSummarize:
             )
         ]
         engine = build_engine(
-            [], [], "unused",
+            [],
+            [],
+            "unused",
             store=FakeStore(chunks),
             summarizer=FakeSummarizer("Final answer [1].", summaries),
         )
@@ -466,7 +470,9 @@ class TestSummarize:
             SectionSummary(marker=1, section="2 Methods", text="s", chunk_ids=[chunks[0].chunk_id])
         ]
         engine = build_engine(
-            [], [], "unused",
+            [],
+            [],
+            "unused",
             verification_enabled=False,
             store=FakeStore(chunks),
             summarizer=FakeSummarizer("Final answer [1].", summaries),
@@ -489,6 +495,103 @@ class TestSummarize:
         assert question_asked  # not None/empty - the summarizer always gets a request
 
 
+class TestSummaryFallback:
+    """A global question the keyword router misses ("what is this research
+    about" for a Wikipedia article - "research" wasn't a recognised document
+    word) should still get answered: when retrieval gives up, answer()/
+    stream_answer() retry via summarize() before finalising an abstain."""
+
+    def test_a_weak_retrieval_falls_back_to_a_summary_when_one_succeeds(self):
+        chunks = [make_chunk("real source text", index=0, section_path=["2 Methods"])]
+        summaries = [
+            SectionSummary(marker=1, section="2 Methods", text="s", chunk_ids=[chunks[0].chunk_id])
+        ]
+        engine = build_engine(
+            [candidate("weak", 0)],
+            [0.05],  # below score_threshold - selection is insufficient
+            "unused",
+            store=FakeStore(chunks),
+            summarizer=FakeSummarizer("The paper studies X [1].", summaries),
+        )
+
+        answer = engine.answer("what is this research about", "doc-1")
+
+        assert not answer.abstained
+        assert answer.text == "The paper studies X [1]."
+
+    def test_still_abstains_when_the_document_has_nothing_to_summarise_either(self):
+        engine = build_engine(
+            [candidate("weak", 0)],
+            [0.05],
+            "unused",
+            store=FakeStore([]),
+            summarizer=FakeSummarizer("", []),
+        )
+
+        answer = engine.answer("what is this research about", "doc-1")
+
+        assert answer.abstained
+
+    def test_all_documents_mode_never_falls_back_to_a_summary(self):
+        # summarize() needs one document to scope to (rag.md 8) - a
+        # cross-paper conversation (document_id=None) has no single document
+        # to fall back to, so it must stay a plain abstain.
+        engine = build_engine(
+            [candidate("weak", 0)],
+            [0.05],
+            "unused",
+            store=FakeStore([make_chunk("text", index=0)]),
+            summarizer=FakeSummarizer("would never be reached", []),
+        )
+
+        answer = engine.answer("what is this research about", document_id=None)
+
+        assert answer.abstained
+        assert engine.summarizer.calls == []
+
+    def test_stream_answer_falls_back_to_a_summary_with_the_normal_event_shape(self):
+        chunks = [make_chunk("real source text", index=0, section_path=["2 Methods"])]
+        summaries = [
+            SectionSummary(marker=1, section="2 Methods", text="s", chunk_ids=[chunks[0].chunk_id])
+        ]
+        engine = build_engine(
+            [candidate("weak", 0)],
+            [0.05],
+            "unused",
+            store=FakeStore(chunks),
+            summarizer=FakeSummarizer("The paper studies X [1].", summaries),
+        )
+
+        events = list(engine.stream_answer("what is this research about", "doc-1"))
+
+        assert [event.event for event in events] == ["citations", "token", "done"]
+        assert events[1].token == "The paper studies X [1]."
+        assert events[2].answer.text == "The paper studies X [1]."
+
+    def test_a_mid_stream_sentinel_falls_back_without_a_second_citations_event(self):
+        # Retrieval succeeds (above threshold) but the model itself signals
+        # abstain - the fallback still applies here since nothing has
+        # reached the client yet (still held), but citations for this turn
+        # were already sent once, right after retrieval.
+        chunks = [make_chunk("real source text", index=0, section_path=["2 Methods"])]
+        summaries = [
+            SectionSummary(marker=1, section="2 Methods", text="s", chunk_ids=[chunks[0].chunk_id])
+        ]
+        engine = build_engine(
+            [candidate("relevant", 0)],
+            [0.9],
+            ABSTAIN_SENTINEL,
+            store=FakeStore(chunks),
+            summarizer=FakeSummarizer("The paper studies X [1].", summaries),
+        )
+
+        events = list(engine.stream_answer("what is this research about", "doc-1"))
+
+        assert [event.event for event in events] == ["citations", "token", "done"]
+        assert events[1].token == "The paper studies X [1]."
+        assert not events[2].answer.abstained
+
+
 class TestAsk:
     def test_a_specific_question_is_answered_normally(self):
         engine = build_engine([candidate("relevant", 0)], [0.9], "Grounded answer [1].")
@@ -504,7 +607,9 @@ class TestAsk:
             SectionSummary(marker=1, section="2 Methods", text="s", chunk_ids=[chunks[0].chunk_id])
         ]
         engine = build_engine(
-            [], [], "unused",
+            [],
+            [],
+            "unused",
             store=FakeStore(chunks),
             summarizer=FakeSummarizer("Final [1].", summaries),
         )
@@ -519,7 +624,9 @@ class TestAsk:
         # everything ever ingested" design, so an unscoped global-sounding
         # question still goes through retrieval like any other question.
         engine = build_engine(
-            [candidate("relevant", 0)], [0.9], "Grounded answer [1].",
+            [candidate("relevant", 0)],
+            [0.9],
+            "Grounded answer [1].",
             summarizer=FakeSummarizer("unused", []),
         )
 
@@ -534,9 +641,7 @@ class TestBuildTree:
         leaves = [make_chunk("a", index=0), make_chunk("b", index=1)]
         node = make_chunk("summary", index=0)
         store = FakeStore(leaves)
-        engine = build_engine(
-            [], [], "unused", store=store, tree_builder=FakeTreeBuilder([node])
-        )
+        engine = build_engine([], [], "unused", store=store, tree_builder=FakeTreeBuilder([node]))
 
         count = engine.build_tree("doc-1")
 
@@ -572,7 +677,9 @@ class TestTreeSummaries:
         node = tree_node("methods summary", "2 Methods", leaves)
         summarizer = FakeSummarizer("Final [1].", [])
         engine = build_engine(
-            [], [], "unused",
+            [],
+            [],
+            "unused",
             store=FakeStore(leaves, nodes={1: [node]}),
             summarizer=summarizer,
             summary_method="raptor",
@@ -591,7 +698,9 @@ class TestTreeSummaries:
         leaves = [make_chunk("the real leaf text", index=0, section="2 Methods")]
         node = tree_node("invented summary", "2 Methods", leaves)
         engine = build_engine(
-            [], [], "unused",
+            [],
+            [],
+            "unused",
             store=FakeStore(leaves, nodes={1: [node]}),
             summarizer=FakeSummarizer("Final [1].", []),
             summary_method="raptor",
@@ -605,7 +714,9 @@ class TestTreeSummaries:
         leaves = [make_chunk("leaf", index=0)]
         summarizer = FakeSummarizer("Final.", [])
         engine = build_engine(
-            [], [], "unused",
+            [],
+            [],
+            "unused",
             store=FakeStore(leaves),
             summarizer=summarizer,
             summary_method="raptor",

@@ -5,7 +5,6 @@ reachable from a terminal or a script - useful for ingesting a paper set or
 running an evaluation without starting a server.
 """
 
-import json
 import time
 from enum import StrEnum
 from pathlib import Path
@@ -193,7 +192,8 @@ def evaluate(
 
     Retrieval modes are compared by running this once per mode, e.g.
     ACR_RETRIEVAL__MODE=dense abstractrag eval --retrieval-only --json dense.json
-    The phase 2 ablation table was measured on rag_paper.json alone.
+    The retrieval-mode ablation table (docs/roadmap.md) was measured on
+    rag_paper.json alone.
     """
     setup_logging()
     engine = get_engine()
@@ -292,18 +292,6 @@ def serve(host: str = "0.0.0.0", port: int = 8000, reload: bool = False) -> None
     import uvicorn
 
     uvicorn.run("abstractrag.main:app", host=host, port=port, reload=reload)
-
-
-@app.command("export-openapi")
-def export_openapi(
-    output: Path = typer.Option(Path("shared/openapi.json"), "--output"),
-) -> None:
-    """Write the OpenAPI schema that the React and Flutter clients are generated from."""
-    from abstractrag.main import create_app
-
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(create_app().openapi(), indent=2), encoding="utf-8")
-    typer.echo(f"wrote {output}")
 
 
 if __name__ == "__main__":

@@ -70,7 +70,13 @@ class BgeM3Embedder:
 
     def unload(self) -> None:
         """Drop the model so the LLM has the GPU to itself. Reloads lazily
-        (~15-20s) on next use - only worth calling right before an LLM call."""
-        if self._model is not None:
+        (~15-20s) on next use - only worth calling right before an LLM call.
+
+        A no-op on CPU: there is no GPU contention to relieve, so dropping and
+        reloading would only pay the reload cost for nothing - measured as a
+        real, repeated cost in the Docker deployment (embedding/reranker
+        forced to CPU), where every agent retry's LLM call was reloading both
+        models for no benefit."""
+        if self._model is not None and self.settings.device != "cpu":
             self._model = None
             release_cuda_memory()

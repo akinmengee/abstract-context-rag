@@ -1,10 +1,36 @@
-# Development runs Qdrant, the backend and the dev UI in Docker, while llama.cpp
-# stays on the host: giving a container the GPU costs extra overhead, and 6 GB of
-# VRAM has none to spare. `--profile gpu` moves llama.cpp into Docker for a final,
-# single-command demo.
+# One command brings up the whole app: Qdrant, the backend and the web
+# client are always containerized (`docker compose up`), so cloning this repo
+# onto a fresh machine and running that one command is the entire setup.
+# Ollama is the one deliberate exception - it stays on the host. Giving a
+# container the GPU needs the NVIDIA Container Toolkit and adds passthrough
+# overhead for no benefit on a single machine, and Ollama already runs as an
+# always-on host service the backend just points at. `--profile gpu` instead
+# moves the LLM itself into Docker (a plain llama.cpp server, not Ollama) for
+# a deploy with zero host-level LLM setup - see the `llm` service below for
+# what that trades away.
+#
+# The backend container needs an NVIDIA GPU + the NVIDIA Container Toolkit
+# (see the `backend` service below for why, and its own device reservation).
+# No CPU-only fallback is kept here as a second file/profile any more - it
+# was (`docker-compose.gpu.yml`, removed 2026-09-29) and having two files for
+# one toggle was more confusing than useful for a single-user project. A
+# machine with no GPU at all should run the backend outside Docker instead
+# (`abstractrag serve`, README "Quick start") - `config.yaml` already
+# defaults `embedding.device`/`reranker.device` to `"cuda"`, and dropping to
+# `"cpu"` there (env override: `ACR_EMBEDDING__DEVICE=cpu
+# ACR_RERANKER__DEVICE=cpu`) works the same way outside Docker as it used to
+# inside it.
 
 services:
   qdrant:
+    # The vendor image, unmodified - no custom code, so no build context/
+    # Dockerfile of our own (a `qdrant/` folder holding only `FROM
+    # qdrant/qdrant:latest` was tried and reverted 2026-09-29: it looked like
+    # there was something to find there and there wasn't, which is worse
+    # than just naming the image directly). The client that actually talks
+    # to Qdrant is backend/abstractrag/database/qdrant_store.py - that's
+    # orchestration code the RAG engine calls, and it runs inside the
+    # backend container, not this one.
     image: qdrant/qdrant:latest
     ports:
       - "6333:6333"
@@ -12,14 +38,37 @@ services:
       - ./data/qdrant:/qdrant/storage
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      # Resolves PyPI's default CUDA build of torch/torchvision instead of
+      # the CPU-only wheel index (see backend/Dockerfile) - needed for
+      # ACR_EMBEDDING__DEVICE=cuda below to work at all, not just be fast: a
+      # CPU-only torch crashes the first embed call with "AssertionError:
+      # Torch not compiled with CUDA enabled" the moment a model is moved to
+      # the device, reservation or not (measured 2026-09-29, before this arg
+      # existed).
+      args:
+        TORCH_VARIANT: cuda
     ports:
       - "8000:8000"
     environment:
       ACR_QDRANT__URL: http://qdrant:6333
-      # The host's llama.cpp server, reachable through the gateway below.
-      ACR_LLM__BASE_URL: http://host.docker.internal:8080/v1
+      # The host's Ollama server (llm/models/*.Modelfile) by default,
+      # reachable through the gateway below - same model, same template, as
+      # local dev. Using `--profile gpu` swaps this for the containerized
+      # `llm` service instead - set ACR_LLM__BASE_URL=http://llm:8080/v1
+      # (e.g. in a .env file) when doing that; the two aren't auto-switched.
+      ACR_LLM__BASE_URL: ${ACR_LLM__BASE_URL:-http://host.docker.internal:11434/v1}
       ACR_INGESTION__STORAGE_DIR: /data/documents
+      ACR_DATABASE__PATH: /data/app.db
+      # CPU embedding/reranking measured 157.9s reranking 50 candidates vs
+      # 10.3s on GPU (15.3x) - see docs/roadmap.md "Phase 9 continued: the
+      # GPU overlay was never actually verified". Sharing the GPU already
+      # reserved below with retrieval too, not just the LLM, costs nothing
+      # extra (embed -> rerank -> LLM run sequentially within one request,
+      # per config.yaml's embedding.device comment).
+      ACR_EMBEDDING__DEVICE: cuda
+      ACR_RERANKER__DEVICE: cuda
       # Model caches are large; keep them on a volume instead of in the image.
       HF_HOME: /data/huggingface
     volumes:
@@ -28,27 +77,57 @@ services:
       - "host.docker.internal:host-gateway"
     depends_on:
       - qdrant
+    # Requires the NVIDIA Container Toolkit (see the file header). No GPU on
+    # this machine at all -> run the backend outside Docker instead
+    # (`abstractrag serve`), not this container.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
-  ui:
-    build: ./ui
+  web:
+    build: ./web
     ports:
-      - "7860:7860"
-    environment:
-      ACR_API_URL: http://backend:8000
+      - "5173:80"
     depends_on:
       - backend
 
+  # Raw llama.cpp, not Ollama - a fully containerized alternative to the
+  # host Ollama setup, for a deploy that needs zero LLM install on the host.
+  # Verified (2026-09-27): at temperature 0, with the same generation params
+  # this repo's Ollama Modelfile sets (top_k 20, top_p 0.8, repeat_penalty 1,
+  # <|im_start|>/<|im_end|> stop strings), a grounded citation question and
+  # an out-of-context question sent to both `/v1/chat/completions` endpoints
+  # came back byte-identical - same answer text, same NOT_IN_SOURCE abstain,
+  # same completion token counts - so --jinja reading the chat template
+  # straight from the GGUF's metadata matches the Modelfile's explicit
+  # template for this model. Not yet run through the full `abstractrag eval`
+  # golden set (only two hand-picked prompts), and only exercised the plain
+  # single-turn path, not multi-hop/agent mode.
+  # One real constraint either way: this and the host Ollama model can't
+  # both hold weights on a 6 GB card at once - Ollama returned "model
+  # requires more system memory than is available" while this container had
+  # the model loaded. Stop this service before also using host Ollama.
   llm:
     profiles: ["gpu"]
+    # The vendor image, unmodified - no custom code, so no build context/
+    # Dockerfile of our own (same call as qdrant above, same date). llm/
+    # still exists as a real folder for llm/models/ (the actual GGUFs and
+    # Ollama Modelfiles this service mounts below) - that content earns the
+    # folder; an empty Dockerfile wrapper next to it didn't.
     image: ghcr.io/ggml-org/llama.cpp:server-cuda
     ports:
       - "8080:8080"
     volumes:
-      - ./models:/models
+      - ./llm/models:/models
     command: >
       -m /models/${LLM_MODEL_FILE:-Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf}
       --host 0.0.0.0 --port 8080
       --ctx-size ${LLM_CTX_SIZE:-8192}
+      --jinja
       -ngl 99
     deploy:
       resources:
